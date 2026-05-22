@@ -56,7 +56,7 @@ if prompt := st.chat_input("AI 튜터의 질문에 답하거나 추가 질문을
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     try:
-        model = genai.GenerativeModel(model_name="gemini-3.1-pro-preview", system_instruction=SYSTEM_INSTRUCTION)
+        model = genai.GenerativeModel(model_name="gemini-3.5-flash", system_instruction=SYSTEM_INSTRUCTION)
         
         # 이전 대화 맥락 반영
         chat_history = []

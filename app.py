@@ -189,10 +189,16 @@ if prompt := st.chat_input("AI 튜터의 질문에 답하거나 추가 질문을
             
             chat = model.start_chat(history=chat_history)
             
-            if uploaded_file is not None:
+            # 세션에 이번 대화방에서 이미지를 보낸 적이 있는지 기록하는 변수 추가
+            image_sent_key = f"image_sent_{st.session_state.current_chat_id}"
+            
+            if uploaded_file is not None and not st.session_state.get(image_sent_key, False):
+                # 이미지가 있고, 아직 이 방에서 보낸 적이 없을 때만 사진 묶어서 전송
                 img = Image.open(uploaded_file)
                 response = chat.send_message([prompt, img])
+                st.session_state[image_sent_key] = True # 이제 보냈다고 체크!
             else:
+                # 사진이 화면에 남아있어도, 이미 보낸 적이 있으면 텍스트만 가볍게 전송
                 response = chat.send_message(prompt)
             
             with st.chat_message("assistant"):

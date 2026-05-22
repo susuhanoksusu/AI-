@@ -3,33 +3,45 @@ import google.generativeai as genai
 from PIL import Image
 import json
 import os
+import re
 from datetime import datetime
 
 # 1. 페이지 설정
 st.set_page_config(page_title="M-CoT AI 수학 튜터", page_icon="🧮", layout="centered")
 
-# --- 🔐 로그인 상태 관리 (1, 2, 3번 완벽 해결) ---
+# --- 🔐 로그인 상태 관리 및 엄격한 검증 시스템 ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user_id = ""
 
 if not st.session_state.logged_in:
-    # 로그인 화면: 사이드바가 아닌 메인 화면 중앙에 배치
+    # 로그인 화면
     st.title("👤 학생 로그인")
-    st.markdown("자신의 학번이나 이름을 입력하고 **[시작하기]** 버튼을 눌러주세요.")
+    st.markdown("자신의 학번과 이름을 입력하고 **[🚀 시작하기]** 버튼을 눌러주세요.")
     
     user_id_input = st.text_input("학번/이름 입력 (예: 20401김철수)")
+    
     if st.button("🚀 시작하기", use_container_width=True):
-        if user_id_input.strip() == "":
-            st.error("이름을 입력해야 튜터링을 시작할 수 있습니다!")
+        user_input_clean = user_id_input.strip()
+        
+        # 1. 형식 검사: 숫자 5자리 + 한글 2~4글자
+        if not re.match(r'^\d{5}[가-힣]{2,4}$', user_input_clean):
+            st.error("형식에 맞지 않습니다. 학번/이름을 정확히 입력해주세요. (예: 20401김철수)")
         else:
-            st.session_state.user_id = user_id_input.strip()
-            st.session_state.logged_in = True
-            st.rerun()
-    st.stop() # 로그인 전에는 이 아래의 챗봇 코드가 절대 실행되지 않음 (화면 분리)
+            # 2. 중복 로그인 검사: 이미 동일한 파일이 존재하는지 확인
+            check_file = f"chat_history_{user_input_clean}.json"
+            if os.path.exists(check_file):
+                st.error("이미 누군가 같은 이름으로 로그인 했거나 기록이 남아있습니다. 다른 이름으로 접속해주세요!")
+            else:
+                # 검사 통과 -> 로그인 성공 처리
+                st.session_state.user_id = user_input_clean
+                st.session_state.logged_in = True
+                st.rerun()
+    
+    st.stop() # 로그인 전에는 이 아래의 챗봇 코드가 절대 실행되지 않음
 
 # ----------------------------------------------------
-# 여기서부터는 로그인 성공한 사용자만 볼 수 있는 메인 화면
+# 로그인 성공한 사용자 메인 화면
 # ----------------------------------------------------
 user_id = st.session_state.user_id
 HISTORY_FILE = f"chat_history_{user_id}.json"
@@ -86,12 +98,11 @@ if "current_chat_id" not in st.session_state:
         create_new_chat()
         save_all_chats(st.session_state.all_chats)
 
-# --- 🗑️ 대화 삭제 함수 (4번 문제 해결) ---
+# 대화 삭제 함수
 def delete_chat(chat_id_to_delete):
     if chat_id_to_delete in st.session_state.all_chats:
         del st.session_state.all_chats[chat_id_to_delete]
         
-        # 만약 방금 지운 방이 현재 보고 있던 방이라면 다른 방으로 이동
         if st.session_state.current_chat_id == chat_id_to_delete:
             if st.session_state.all_chats: 
                 st.session_state.current_chat_id = list(st.session_state.all_chats.keys())[-1]
@@ -100,15 +111,18 @@ def delete_chat(chat_id_to_delete):
                 
         save_all_chats(st.session_state.all_chats)
 
-# 5. 왼쪽 사이드바 (학생 전용 대화 기록창 및 제어판)
+# 5. 왼쪽 사이드바 (학생 전용 제어판)
 with st.sidebar:
     st.markdown(f"### 👤 접속자: **{user_id}**")
     
-    # 로그아웃 버튼 (초기화 및 새 학생 진입용)
-    if st.button("🚪 로그아웃", use_container_width=True):
+    # [수정] 로그아웃 시 계정 및 데이터 완전히 파기
+    if st.button("🚪 로그아웃 (초기화)", use_container_width=True):
+        if os.path.exists(HISTORY_FILE):
+            os.remove(HISTORY_FILE) # 🚨 서버에서 파일 완전히 삭제
+            
         st.session_state.logged_in = False
         st.session_state.user_id = ""
-        st.session_state.all_chats = {} # 메모리 초기화
+        st.session_state.all_chats = {} 
         st.rerun()
 
     st.markdown("---")
@@ -121,19 +135,18 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("💬 나의 대화 기록")
 
-    # 대화 목록 출력 및 삭제 버튼 (가로 정렬)
     for cid in reversed(list(st.session_state.all_chats.keys())):
-        col1, col2 = st.columns([4, 1]) # 4:1 비율로 가로 분할
+        col1, col2 = st.columns([4, 1])
         
         chat_title = st.session_state.all_chats[cid]["title"]
         if cid == st.session_state.current_chat_id:
             chat_title = f"▶️ {chat_title}"
             
-        with col1: # 대화방 이동 버튼
+        with col1:
             if st.button(chat_title, key=f"btn_{cid}", use_container_width=True):
                 st.session_state.current_chat_id = cid
                 st.rerun()
-        with col2: # 삭제 버튼
+        with col2:
             if st.button("❌", key=f"del_{cid}"):
                 delete_chat(cid)
                 st.rerun()
@@ -141,7 +154,6 @@ with st.sidebar:
 # 6. 메인 화면 출력
 st.title("🧠 M-CoT AI 수학 튜터")
 
-# 예외 처리: 활성화된 방이 없으면 즉시 생성
 if st.session_state.current_chat_id not in st.session_state.all_chats:
     create_new_chat()
 

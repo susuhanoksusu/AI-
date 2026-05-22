@@ -8,17 +8,30 @@ from datetime import datetime
 # 1. 페이지 설정
 st.set_page_config(page_title="M-CoT AI 수학 튜터", page_icon="🧮", layout="centered")
 
-# --- 🔐 [핵심 추가] 사용자 개별 로그인(세션) 시스템 ---
-with st.sidebar:
+# --- 🔐 로그인 상태 관리 (1, 2, 3번 완벽 해결) ---
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.user_id = ""
+
+if not st.session_state.logged_in:
+    # 로그인 화면: 사이드바가 아닌 메인 화면 중앙에 배치
     st.title("👤 학생 로그인")
-    st.caption("자신의 학번이나 이름을 입력하고 엔터를 치세요. (예: 20401김철수)")
-    user_id = st.text_input("학번/이름 입력", key="user_id_input")
+    st.markdown("자신의 학번이나 이름을 입력하고 **[시작하기]** 버튼을 눌러주세요.")
+    
+    user_id_input = st.text_input("학번/이름 입력 (예: 20401김철수)")
+    if st.button("🚀 시작하기", use_container_width=True):
+        if user_id_input.strip() == "":
+            st.error("이름을 입력해야 튜터링을 시작할 수 있습니다!")
+        else:
+            st.session_state.user_id = user_id_input.strip()
+            st.session_state.logged_in = True
+            st.rerun()
+    st.stop() # 로그인 전에는 이 아래의 챗봇 코드가 절대 실행되지 않음 (화면 분리)
 
-if not user_id:
-    st.warning("👈 왼쪽 화면에서 학번이나 이름을 입력해야 튜터링을 시작할 수 있습니다!")
-    st.stop() # 이름을 입력하기 전까지는 화면을 멈춤
-
-# 접속한 학생의 이름으로 전용 저장 파일 생성
+# ----------------------------------------------------
+# 여기서부터는 로그인 성공한 사용자만 볼 수 있는 메인 화면
+# ----------------------------------------------------
+user_id = st.session_state.user_id
 HISTORY_FILE = f"chat_history_{user_id}.json"
 
 def load_all_chats():
@@ -34,7 +47,15 @@ def save_all_chats(chats):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(chats, f, ensure_ascii=False, indent=4)
 
-# 2. 구글 API 키 로드
+def create_new_chat():
+    new_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    st.session_state.all_chats[new_id] = {
+        "title": f"📝 탐구 ({datetime.now().strftime('%m/%d %H:%M')})",
+        "messages": [{"role": "assistant", "content": f"반갑습니다 **{user_id}** 학생! 새로운 문제를 함께 해결해 봅시다. 질문이나 사진을 올려주세요!"}]
+    }
+    st.session_state.current_chat_id = new_id
+
+# 2. 구글 API 키 세팅
 try:
     api_key = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=api_key)
@@ -51,10 +72,10 @@ SYSTEM_INSTRUCTION = """
 1. 어떠한 경우에도 최종 정답이나 전체 풀이 과정을 한 번에 제공하지 마십시오.
 2. 한 번의 답변에는 반드시 '단 하나의 질문'만 던지고 학생의 답변을 기다리십시오.
 3. 학생이 틀리면 "틀렸어" 대신 인지적 힌트(비계)를 제공하십시오.
-4. 학생이 문제나 손글씨 풀이 사진을 업로드하면, 이미지 속 수식을 정확히 해독하고 오류를 짚어주거나 [Step 1] 질문부터 시작하십시오.
+4. 학생이 문제 사진이나 손글씨 풀이 사진을 업로드하면, 이미지 속 수식을 정확히 해독하고 오류를 짚어주거나 [Step 1] 질문부터 시작하십시오.
 """
 
-# 4. 학생별 데이터 로드 및 초기화
+# 4. 데이터 초기화
 if "all_chats" not in st.session_state:
     st.session_state.all_chats = load_all_chats()
 
@@ -62,40 +83,67 @@ if "current_chat_id" not in st.session_state:
     if st.session_state.all_chats:
         st.session_state.current_chat_id = list(st.session_state.all_chats.keys())[-1]
     else:
-        new_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        st.session_state.current_chat_id = new_id
-        st.session_state.all_chats[new_id] = {
-            "title": "💡 새로운 수학 탐구",
-            "messages": [{"role": "assistant", "content": f"반갑습니다 {user_id} 학생! 오늘 함께 고민해볼 수학 문제를 사진으로 찍어 올리거나 텍스트로 입력해 주세요."}]
-        }
+        create_new_chat()
         save_all_chats(st.session_state.all_chats)
 
-# 5. 왼쪽 사이드바 (학생 전용 대화 기록창)
-st.sidebar.markdown("---")
-st.sidebar.subheader("💬 나의 대화 기록")
+# --- 🗑️ 대화 삭제 함수 (4번 문제 해결) ---
+def delete_chat(chat_id_to_delete):
+    if chat_id_to_delete in st.session_state.all_chats:
+        del st.session_state.all_chats[chat_id_to_delete]
+        
+        # 만약 방금 지운 방이 현재 보고 있던 방이라면 다른 방으로 이동
+        if st.session_state.current_chat_id == chat_id_to_delete:
+            if st.session_state.all_chats: 
+                st.session_state.current_chat_id = list(st.session_state.all_chats.keys())[-1]
+            else: 
+                create_new_chat()
+                
+        save_all_chats(st.session_state.all_chats)
 
-if st.sidebar.button("➕ 새 대화 시작", use_container_width=True):
-    new_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    st.session_state.all_chats[new_id] = {
-        "title": f"📝 탐구 ({datetime.now().strftime('%m/%d %H:%M')})",
-        "messages": [{"role": "assistant", "content": "새로운 문제를 함께 해결해 봅시다. 질문이나 사진을 올려주세요!"}]
-    }
-    st.session_state.current_chat_id = new_id
-    save_all_chats(st.session_state.all_chats)
-    st.rerun()
-
-st.sidebar.markdown("---")
-for cid in reversed(list(st.session_state.all_chats.keys())):
-    chat_title = st.session_state.all_chats[cid]["title"]
-    if cid == st.session_state.current_chat_id:
-        chat_title = f"▶️ {chat_title}"
-    if st.sidebar.button(chat_title, key=cid, use_container_width=True):
-        st.session_state.current_chat_id = cid
+# 5. 왼쪽 사이드바 (학생 전용 대화 기록창 및 제어판)
+with st.sidebar:
+    st.markdown(f"### 👤 접속자: **{user_id}**")
+    
+    # 로그아웃 버튼 (초기화 및 새 학생 진입용)
+    if st.button("🚪 로그아웃", use_container_width=True):
+        st.session_state.logged_in = False
+        st.session_state.user_id = ""
+        st.session_state.all_chats = {} # 메모리 초기화
         st.rerun()
+
+    st.markdown("---")
+    
+    if st.button("➕ 새 대화 시작", use_container_width=True):
+        create_new_chat()
+        save_all_chats(st.session_state.all_chats)
+        st.rerun()
+
+    st.markdown("---")
+    st.subheader("💬 나의 대화 기록")
+
+    # 대화 목록 출력 및 삭제 버튼 (가로 정렬)
+    for cid in reversed(list(st.session_state.all_chats.keys())):
+        col1, col2 = st.columns([4, 1]) # 4:1 비율로 가로 분할
+        
+        chat_title = st.session_state.all_chats[cid]["title"]
+        if cid == st.session_state.current_chat_id:
+            chat_title = f"▶️ {chat_title}"
+            
+        with col1: # 대화방 이동 버튼
+            if st.button(chat_title, key=f"btn_{cid}", use_container_width=True):
+                st.session_state.current_chat_id = cid
+                st.rerun()
+        with col2: # 삭제 버튼
+            if st.button("❌", key=f"del_{cid}"):
+                delete_chat(cid)
+                st.rerun()
 
 # 6. 메인 화면 출력
 st.title("🧠 M-CoT AI 수학 튜터")
-st.caption(f"접속자: {user_id} | 정답은 알려주지 않아요! 단계별로 함께 생각해봐요.")
+
+# 예외 처리: 활성화된 방이 없으면 즉시 생성
+if st.session_state.current_chat_id not in st.session_state.all_chats:
+    create_new_chat()
 
 current_messages = st.session_state.all_chats[st.session_state.current_chat_id]["messages"]
 
@@ -117,7 +165,6 @@ if prompt := st.chat_input("AI 튜터의 질문에 답하거나 추가 질문을
     if len(current_messages) == 3:
         st.session_state.all_chats[st.session_state.current_chat_id]["title"] = f"🔍 {prompt[:10]}..."
 
-    # 로딩 스피너 유지 및 답변 생성
     with st.spinner("AI 튜터가 생각하는 중입니다..."):
         try:
             model = genai.GenerativeModel(model_name="gemini-3.5-flash", system_instruction=SYSTEM_INSTRUCTION)
@@ -139,9 +186,9 @@ if prompt := st.chat_input("AI 튜터의 질문에 답하거나 추가 질문을
                 st.markdown(response.text)
             current_messages.append({"role": "assistant", "content": response.text})
             
-            # 저장 후, 이전처럼 억지로 st.rerun()을 호출하지 않음 (화면 깜빡임 버그 방지)
             st.session_state.all_chats[st.session_state.current_chat_id]["messages"] = current_messages
             save_all_chats(st.session_state.all_chats)
+            st.rerun()
             
         except Exception as e:
             st.error(f"오류가 발생했습니다: {e}")

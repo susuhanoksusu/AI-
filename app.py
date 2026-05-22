@@ -180,7 +180,7 @@ if prompt := st.chat_input("AI 튜터의 질문에 답하거나 추가 질문을
 
     with st.spinner("AI 튜터가 생각하는 중입니다..."):
         try:
-            model = genai.GenerativeModel(model_name="gemini-3.5-flash", system_instruction=SYSTEM_INSTRUCTION)
+            model = genai.GenerativeModel(model_name="gemini-1.5-flash", system_instruction=SYSTEM_INSTRUCTION)
             
             chat_history = []
             for msg in current_messages[:-1]:

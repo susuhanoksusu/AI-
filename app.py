@@ -61,9 +61,13 @@ def save_all_chats(chats):
         json.dump(chats, f, ensure_ascii=False, indent=4)
 
 def create_new_chat():
-    new_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # 다른 코드를 건드리지 않기 위해 함수 내부에서 한국 시간(UTC+9)을 계산합니다.
+    import datetime as dt
+    kst_now = dt.datetime.now(dt.timezone(dt.timedelta(hours=9)))
+    
+    new_id = kst_now.strftime("%Y%m%d_%H%M%S")
     st.session_state.all_chats[new_id] = {
-        "title": f"📝 탐구 ({datetime.now().strftime('%m/%d %H:%M')})",
+        "title": f"📝 탐구 ({kst_now.strftime('%m/%d %H:%M')})",
         "messages": [{"role": "assistant", "content": f"반갑습니다 **{user_id}** 학생! 새로운 문제를 함께 해결해 봅시다. 질문이나 사진을 올려주세요!"}]
     }
     st.session_state.current_chat_id = new_id

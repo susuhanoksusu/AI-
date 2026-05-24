@@ -12,7 +12,7 @@ st.set_page_config(page_title="M-CoT AI 수학 튜터", page_icon="🧮", layout
 
 # --- 🌐 Supabase 클라우드 데이터베이스 연결 설정 ---
 # 임시로 주소를 코드에 직접 넣으셔도 되고, 보안을 위해선 Streamlit Secrets를 권장합니다.
-SUPABASE_URL = "https://jvwiwemizcvrbgjamuyu.supabase.co/rest/v1/"
+SUPABASE_URL = "https://jvwiwemizcvrbgjamuyu.supabase.co"
 SUPABASE_KEY = "sb_publishable_r5TrFrkJjDxmX6dmn7uepw_9719X6yZ"
 
 try:

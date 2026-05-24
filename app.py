@@ -99,8 +99,13 @@ if st.session_state.is_admin:
     st.markdown("---")
     
     # 2. 학생 대화 기록 모니터링 (Supabase DB 조회)
-    st.subheader("📡 학생 대화 기록 모니터링 (실시간)")
-    
+    col_title, col_btn = st.columns([8, 2])
+    with col_title:
+        st.subheader("📡 학생 대화 기록 모니터링")
+    with col_btn:
+        if st.button("🔄 새로고침", use_container_width=True):
+            st.rerun() # 👈 이 마법의 한 줄이 화면을 즉시 최신 상태로 갱신합니다!
+            
     try:
         # DB에서 대화 기록이 있는 모든 학생의 ID를 가져옴
         db_response = supabase.table("student_chats").select("user_id").execute()

@@ -324,7 +324,8 @@ if not st.session_state.get("all_chats"):
 
 # 5. 왼쪽 사이드바 (학생 전용 제어판)
 with st.sidebar:
-    st.markdown(f"### 👤 접속자: **{user_id}**")
+    # user_id 대신 세션 상태에 저장된 값을 직접 불러오도록 수정했습니다.
+    st.markdown(
     
     # 로그아웃 버튼 (클라우드 연동 버전: 기기 접속만 해제하고 DB 기록은 보존)
     if st.button("🚪 로그아웃", use_container_width=True):

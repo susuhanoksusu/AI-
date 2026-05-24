@@ -284,14 +284,12 @@ def delete_chat(chat_id_to_delete):
 with st.sidebar:
     st.markdown(f"### 👤 접속자: **{user_id}**")
     
-    # 로그아웃 버튼 (누르면 서버에서 해당 학생 파일 완전 삭제 및 초기화)
-    if st.button("🚪 로그아웃 (기록 완전 삭제)", use_container_width=True):
-        if os.path.exists(HISTORY_FILE):
-            os.remove(HISTORY_FILE) # 서버에서 파일 물리적 삭제
-            
+    # 로그아웃 버튼 (클라우드 연동 버전: 기기 접속만 해제하고 DB 기록은 보존)
+    if st.button("🚪 로그아웃", use_container_width=True):
         st.session_state.logged_in = False
         st.session_state.user_id = ""
         st.session_state.all_chats = {} 
+        st.session_state.is_admin = False
         st.rerun()
 
     st.markdown("---")

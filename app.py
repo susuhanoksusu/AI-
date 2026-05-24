@@ -119,14 +119,32 @@ if st.session_state.is_admin:
     else:
         selected_student = st.selectbox("👩‍🎓 기록을 열람할 학생을 선택하세요", options=student_list)
 
-        # 🗑️ 학생 데이터 영구 삭제 버튼
+        # 🗑️ 학생 데이터 영구 삭제 (오터치 방지 2단계 확인 절차)
         if st.button(f"🚨 '{selected_student}' 학생 기록 영구 삭제", type="primary", use_container_width=True):
-            try:
-                supabase.table("student_chats").delete().eq("user_id", selected_student).execute()
-                st.toast(f"✅ {selected_student} 학생의 기록이 완전히 삭제되었습니다.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"⚠️ 삭제 실패: {e}")
+            # 첫 번째 버튼을 누르면 어떤 학생을 지우려고 했는지 기억해둡니다.
+            st.session_state.show_confirm = selected_student
+
+        # 삭제 확인 버튼을 눌렀을 때만 아래 경고창과 선택 버튼이 팝업처럼 등장합니다.
+        if st.session_state.get("show_confirm") == selected_student:
+            st.error(f"⚠️ **[최종 확인]** '{selected_student}' 학생의 모든 대화 기록이 데이터베이스에서 영구 삭제되며, 절대로 복구할 수 없습니다. 정말 진행하시겠습니까?")
+            
+            # 가로로 버튼 2개 배치 (진짜 삭제 / 취소)
+            col_yes, col_no = st.columns(2)
+            with col_yes:
+                if st.button("🔥 네, 진짜로 삭제합니다", type="primary", use_container_width=True):
+                    try:
+                        # 진짜 삭제 수행
+                        supabase.table("student_chats").delete().eq("user_id", selected_student).execute()
+                        st.session_state.show_confirm = None  # 확인 상태 초기화
+                        st.toast(f"✅ {selected_student} 학생의 기록이 완전히 삭제되었습니다.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"⚠️ 삭제 실패: {e}")
+            with col_no:
+                if st.button("❌ 아니오, 취소합니다", use_container_width=True):
+                    st.session_state.show_confirm = None  # 확인 상태 초기화
+                    st.rerun()
+            st.markdown("---")
         
         # 선택한 학생의 데이터를 DB에서 실시간 원격 조회
         try:

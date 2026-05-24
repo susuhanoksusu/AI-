@@ -9,68 +9,109 @@ from datetime import datetime
 # 1. 페이지 설정
 st.set_page_config(page_title="M-CoT AI 수학 튜터", page_icon="🧮", layout="centered")
 
-# --- 🔐 로그인 상태 관리 및 이어하기(Persistence) 시스템 ---
+# --- 🔐 설정 파일 (비밀번호 저장용) 관리 ---
+SETTINGS_FILE = "admin_settings.json"
+
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    else:
+        # 최초 실행 시 기본 비밀번호 세팅
+        default_settings = {"student_pw": "1234", "admin_pw": "admin1234"}
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(default_settings, f)
+        return default_settings
+
+def save_settings(settings_data):
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(settings_data, f)
+
+app_settings = load_settings()
+
+# --- 🔐 로그인 상태 관리 ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user_id = ""
+    st.session_state.is_admin = False  # 관리자 여부 추가
 
 if not st.session_state.logged_in:
-    # 로그인 화면
-    st.title("👤 학생 로그인")
-    st.markdown("자신의 학번과 이름을 입력하고 **[🚀 시작하기]** 버튼을 눌러주세요.")
+    st.title("👤 학생/관리자 로그인")
+    st.markdown("자신의 학번/이름과 **비밀번호**를 입력해주세요. (관리자는 '20000선생님' 입력)")
     
-    user_id_input = st.text_input("학번/이름 입력 (예: 20401김철수)")
+    user_id_input = st.text_input("학번/이름 (예: 20401김철수)")
+    pw_input = st.text_input("비밀번호", type="password") # 비밀번호 칸 추가
     
-    if st.button("🚀 시작하기", use_container_width=True):
+    if st.button("🚀 접속하기", use_container_width=True):
         user_input_clean = user_id_input.strip()
         
-        # 형식 검사: 숫자 5자리 + 한글 2~4글자
-        if not re.match(r'^\d{5}[가-힣]{2,4}$', user_input_clean):
-            st.error("형식에 맞지 않습니다. 학번과 이름을 정확히 입력해주세요. (예: 20401김철수)")
-        else:
-            # [수정 포인트] 중복 차단 조건을 없애고, 기존 유저면 이어하기 처리
-            st.session_state.user_id = user_input_clean
-            st.session_state.logged_in = True
-            
-            # 기존 기록 파일이 있는지 미리 확인해서 안내 메시지 띄우기 준비
-            check_file = f"chat_history_{user_input_clean}.json"
-            if os.path.exists(check_file):
-                st.toast(f"🔄 {user_input_clean} 학생, 이전 대화 기록을 불러왔습니다!")
+        # [분기 1] 관리자 로그인 시도
+        if user_input_clean == "20000선생님":
+            if pw_input == app_settings["admin_pw"]:
+                st.session_state.user_id = "관리자"
+                st.session_state.is_admin = True
+                st.session_state.logged_in = True
+                st.rerun()
+            else:
+                st.error("🚫 관리자 비밀번호가 틀렸습니다.")
                 
-            st.rerun()
-    
-    st.stop() # 로그인 전에는 이 아래의 챗봇 코드가 절대 실행되지 않음
+        # [분기 2] 학생 로그인 시도
+        else:
+            if not re.match(r'^\d{5}[가-힣]{2,4}$', user_input_clean):
+                st.error("🚫 형식에 맞지 않습니다. (예: 20401김철수)")
+            elif pw_input != app_settings["student_pw"]:
+                st.error("🚫 학생 접속 비밀번호가 틀렸습니다. 선생님께 확인해주세요.")
+            else:
+                st.session_state.user_id = user_input_clean
+                st.session_state.is_admin = False
+                st.session_state.logged_in = True
+                st.toast(f"✅ {user_input_clean} 학생, 환영합니다!")
+                st.rerun()
+                
+    st.stop() # 로그인 전에는 이 아래의 코드가 절대 실행되지 않음
 
 # ----------------------------------------------------
-# 로그인 성공한 사용자 메인 화면
+# 👑 관리자 전용 대시보드 화면
 # ----------------------------------------------------
-user_id = st.session_state.user_id
-HISTORY_FILE = f"chat_history_{user_id}.json"
-
-def load_all_chats():
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
-
-def save_all_chats(chats):
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(chats, f, ensure_ascii=False, indent=4)
-
-def create_new_chat():
-    # 다른 코드를 건드리지 않기 위해 함수 내부에서 한국 시간(UTC+9)을 계산합니다.
-    import datetime as dt
-    kst_now = dt.datetime.now(dt.timezone(dt.timedelta(hours=9)))
+if st.session_state.is_admin:
+    st.title("🛠️ 관리자 대시보드")
     
-    new_id = kst_now.strftime("%Y%m%d_%H%M%S")
-    st.session_state.all_chats[new_id] = {
-        "title": f"📝 탐구 ({kst_now.strftime('%m/%d %H:%M')})",
-        "messages": [{"role": "assistant", "content": f"반갑습니다 **{user_id}** 학생! 새로운 문제를 함께 해결해 봅시다. 질문이나 사진을 올려주세요!"}]
-    }
-    st.session_state.current_chat_id = new_id
+    # 1. 비밀번호 변경 설정
+    st.subheader("🔑 접속 비밀번호 설정")
+    col1, col2 = st.columns(2)
+    with col1:
+        new_student_pw = st.text_input("새로운 학생 접속 비밀번호", value=app_settings["student_pw"])
+    with col2:
+        new_admin_pw = st.text_input("새로운 관리자 비밀번호", value=app_settings["admin_pw"], type="password")
+        
+    if st.button("💾 비밀번호 변경 저장"):
+        app_settings["student_pw"] = new_student_pw
+        app_settings["admin_pw"] = new_admin_pw
+        save_settings(app_settings)
+        st.success("비밀번호가 성공적으로 변경되었습니다!")
+
+    st.markdown("---")
+    
+    # 2. 학생 대화 기록 모니터링
+    st.subheader("📡 학생 대화 기록 모니터링")
+    history_files = [f for f in os.listdir() if f.startswith("chat_history_") and f.endswith(".json")]
+    
+    if not history_files:
+        st.info("아직 대화를 나눈 학생이 없습니다.")
+    else:
+        selected_file = st.selectbox("기록을 열람할 학생을 선택하세요", history_files)
+        if st.button("📂 해당 학생 대화 기록 보기"):
+            with open(selected_file, "r", encoding="utf-8") as f:
+                student_data = json.load(f)
+                st.json(student_data) # 대화 내역을 JSON 형태로 띄워줌
+                
+    st.markdown("---")
+    if st.button("🚪 관리자 로그아웃", use_container_width=True):
+        st.session_state.logged_in = False
+        st.session_state.is_admin = False
+        st.rerun()
+        
+    st.stop() # 관리자는 여기서 화면 출력을 멈추고 학생용 챗봇 코드를 실행하지 않음
 
 # 2. 구글 API 키 세팅
 try:

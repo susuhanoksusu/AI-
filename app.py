@@ -111,10 +111,11 @@ if st.session_state.is_admin:
         st.session_state.is_admin = False
         st.rerun()
         
-   st.stop() # 관리자는 여기서 화면 출력을 멈추고 학생용 챗봇 코드를 실행하지 않음
+    st.stop() # 💡 관리자용 화면 출력을 종료하는 곳 (if문 내부에 속하므로 스페이스 4칸 들여쓰기 필수)
+
 
 # ----------------------------------------------------
-# 📂 학생 대화 기록 관리 필수 함수 (여기를 복구합니다!)
+# 📂 학생 대화 기록 관리 필수 함수 (여기서부터는 다시 들여쓰기 없음!)
 # ----------------------------------------------------
 user_id = st.session_state.user_id
 HISTORY_FILE = f"chat_history_{user_id}.json"

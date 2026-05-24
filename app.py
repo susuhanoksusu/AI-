@@ -111,7 +111,39 @@ if st.session_state.is_admin:
         st.session_state.is_admin = False
         st.rerun()
         
-    st.stop() # 관리자는 여기서 화면 출력을 멈추고 학생용 챗봇 코드를 실행하지 않음
+   st.stop() # 관리자는 여기서 화면 출력을 멈추고 학생용 챗봇 코드를 실행하지 않음
+
+# ----------------------------------------------------
+# 📂 학생 대화 기록 관리 필수 함수 (여기를 복구합니다!)
+# ----------------------------------------------------
+user_id = st.session_state.user_id
+HISTORY_FILE = f"chat_history_{user_id}.json"
+
+def load_all_chats():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_all_chats(chats):
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(chats, f, ensure_ascii=False, indent=4)
+
+def create_new_chat():
+    import datetime as dt
+    kst_now = dt.datetime.now(dt.timezone(dt.timedelta(hours=9)))
+    
+    new_id = kst_now.strftime("%Y%m%d_%H%M%S")
+    st.session_state.all_chats[new_id] = {
+        "title": f"📝 탐구 ({kst_now.strftime('%m/%d %H:%M')})",
+        "messages": [{"role": "assistant", "content": f"반갑습니다 **{user_id}** 학생! 새로운 문제를 함께 해결해 봅시다. 질문이나 사진을 올려주세요!"}]
+    }
+    st.session_state.current_chat_id = new_id
+
+# ----------------------------------------------------
 
 # 2. 구글 API 키 세팅
 try:

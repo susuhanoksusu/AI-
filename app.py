@@ -71,7 +71,7 @@ if not st.session_state.logged_in:
     st.stop() # 로그인 전에는 이 아래의 코드가 절대 실행되지 않음
 
 # ----------------------------------------------------
-# 👑 관리자 전용 대시보드 화면
+# 👑 관리자 전용 대시보드 화면 (채팅창 디자인 적용 버전)
 # ----------------------------------------------------
 if st.session_state.is_admin:
     st.title("🛠️ 관리자 대시보드")
@@ -92,26 +92,63 @@ if st.session_state.is_admin:
 
     st.markdown("---")
     
-    # 2. 학생 대화 기록 모니터링
+    # 2. 학생 대화 기록 모니터링 (✨ 채팅창 UI로 리뉴얼)
     st.subheader("📡 학생 대화 기록 모니터링")
     history_files = [f for f in os.listdir() if f.startswith("chat_history_") and f.endswith(".json")]
     
     if not history_files:
         st.info("아직 대화를 나눈 학생이 없습니다.")
     else:
-        selected_file = st.selectbox("기록을 열람할 학생을 선택하세요", history_files)
-        if st.button("📂 해당 학생 대화 기록 보기"):
-            with open(selected_file, "r", encoding="utf-8") as f:
-                student_data = json.load(f)
-                st.json(student_data) # 대화 내역을 JSON 형태로 띄워줌
+        # 파일명에서 'chat_history_'와 '.json'을 지워 '20401김철수' 형태로 가독성 좋게 노출
+        student_display_names = {f: f.replace("chat_history_", "").replace(".json", "") for f in history_files}
+        
+        selected_file = st.selectbox(
+            "👩‍🎓 기록을 열람할 학생을 선택하세요", 
+            options=history_files,
+            format_func=lambda x: student_display_names[x]
+        )
+        
+        # 선택한 학생의 파일 읽기
+        with open(selected_file, "r", encoding="utf-8") as f:
+            student_chats = json.load(f)
+            
+        if not student_chats:
+            st.warning("이 학생은 아직 대화 기록이 비어있습니다.")
+        else:
+            # 한 학생이 여러 번 접속해서 대화방이 여러 개일 수 있으므로 대화방 선택창 제공
+            chat_ids = list(student_chats.keys())
+            selected_chat_id = st.selectbox(
+                "💬 열람할 대화방 세션 선택",
+                options=chat_ids,
+                format_func=lambda x: student_chats[x].get("title", x)
+            )
+            
+            st.markdown("---")
+            st.markdown(f"### 💬 **{student_display_names[selected_file]}** 학생의 대화방 실시간 모니터링")
+            
+            # 선택된 대화방의 메시지 루프를 돌며 실제 챗봇 디자인으로 렌더링
+            target_messages = student_chats[selected_chat_id].get("messages", [])
+            
+            for msg in target_messages:
+                role = msg.get("role")
+                content = msg.get("content")
                 
+                if role == "user":
+                    # 학생의 말풍선
+                    with st.chat_message("user"):
+                        st.markdown(content)
+                else:
+                    # AI 튜터의 말풍선 (원래 아이콘인 🧠 장착)
+                    with st.chat_message("assistant", avatar="🧠"):
+                        st.markdown(content)
+                        
     st.markdown("---")
     if st.button("🚪 관리자 로그아웃", use_container_width=True):
         st.session_state.logged_in = False
         st.session_state.is_admin = False
         st.rerun()
         
-    st.stop() # 💡 관리자용 화면 출력을 종료하는 곳 (if문 내부에 속하므로 스페이스 4칸 들여쓰기 필수)
+    st.stop() # 관리자용 화면 출력 종료
 
 
 # ----------------------------------------------------

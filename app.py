@@ -5,9 +5,20 @@ import json
 import os
 import re
 from datetime import datetime
+from supabase import create_client, Client
 
 # 1. 페이지 설정
 st.set_page_config(page_title="M-CoT AI 수학 튜터", page_icon="🧮", layout="centered")
+
+# --- 🌐 Supabase 클라우드 데이터베이스 연결 설정 ---
+# 임시로 주소를 코드에 직접 넣으셔도 되고, 보안을 위해선 Streamlit Secrets를 권장합니다.
+SUPABASE_URL = "https://jvwiwemizcvrbgjamuyu.supabase.co/rest/v1/"
+SUPABASE_KEY = "sb_publishable_r5TrFrkJjDxmX6dmn7uepw_9719X6yZ"
+
+try:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+except Exception as e:
+    st.error(f"⚠️ 데이터베이스 연결 실패: {e}")
 
 # --- 🔐 설정 파일 (비밀번호 저장용) 관리 ---
 SETTINGS_FILE = "admin_settings.json"
@@ -17,7 +28,6 @@ def load_settings():
         with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     else:
-        # 최초 실행 시 기본 비밀번호 세팅
         default_settings = {"student_pw": "1234", "admin_pw": "admin1234"}
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(default_settings, f)
@@ -33,19 +43,18 @@ app_settings = load_settings()
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user_id = ""
-    st.session_state.is_admin = False  # 관리자 여부 추가
+    st.session_state.is_admin = False
 
 if not st.session_state.logged_in:
-    st.title("👤 학생 로그인")
-    st.markdown("자신의 학번/이름과 **비밀번호**를 입력해주세요.")
+    st.title("👤 학생/관리자 로그인")
+    st.markdown("자신의 학번/이름과 **비밀번호**를 입력해주세요. (관리자는 '20000선생님' 입력)")
     
     user_id_input = st.text_input("학번/이름 (예: 20401김철수)")
-    pw_input = st.text_input("비밀번호", type="password") # 비밀번호 칸 추가
+    pw_input = st.text_input("비밀번호", type="password")
     
     if st.button("🚀 접속하기", use_container_width=True):
         user_input_clean = user_id_input.strip()
         
-        # [분기 1] 관리자 로그인 시도
         if user_input_clean == "20000선생님":
             if pw_input == app_settings["admin_pw"]:
                 st.session_state.user_id = "관리자"
@@ -54,8 +63,6 @@ if not st.session_state.logged_in:
                 st.rerun()
             else:
                 st.error("🚫 관리자 비밀번호가 틀렸습니다.")
-                
-        # [분기 2] 학생 로그인 시도
         else:
             if not re.match(r'^\d{5}[가-힣]{2,4}$', user_input_clean):
                 st.error("🚫 형식에 맞지 않습니다. (예: 20401김철수)")
@@ -67,11 +74,10 @@ if not st.session_state.logged_in:
                 st.session_state.logged_in = True
                 st.toast(f"✅ {user_input_clean} 학생, 환영합니다!")
                 st.rerun()
-                
-    st.stop() # 로그인 전에는 이 아래의 코드가 절대 실행되지 않음
+    st.stop()
 
 # ----------------------------------------------------
-# 👑 관리자 전용 대시보드 화면 (채팅창 디자인 적용 버전)
+# 👑 관리자 전용 대시보드 화면 (Supabase 클라우드 연동 버전)
 # ----------------------------------------------------
 if st.session_state.is_admin:
     st.title("🛠️ 관리자 대시보드")
@@ -92,30 +98,33 @@ if st.session_state.is_admin:
 
     st.markdown("---")
     
-    # 2. 학생 대화 기록 모니터링 (✨ 채팅창 UI로 리뉴얼)
-    st.subheader("📡 학생 대화 기록 모니터링")
-    history_files = [f for f in os.listdir() if f.startswith("chat_history_") and f.endswith(".json")]
+    # 2. 학생 대화 기록 모니터링 (Supabase DB 조회)
+    st.subheader("📡 학생 대화 기록 모니터링 (실시간)")
     
-    if not history_files:
-        st.info("아직 대화를 나눈 학생이 없습니다.")
+    try:
+        # DB에서 대화 기록이 있는 모든 학생의 ID를 가져옴
+        db_response = supabase.table("student_chats").select("user_id").execute()
+        student_list = [row["user_id"] for row in db_response.data]
+    except Exception as e:
+        student_list = []
+        st.error(f"학생 목록 로드 실패: {e}")
+    
+    if not student_list:
+        st.info("아직 클라우드에 대화를 나눈 학생 기록이 없습니다.")
     else:
-        # 파일명에서 'chat_history_'와 '.json'을 지워 '20401김철수' 형태로 가독성 좋게 노출
-        student_display_names = {f: f.replace("chat_history_", "").replace(".json", "") for f in history_files}
+        selected_student = st.selectbox("👩‍🎓 기록을 열람할 학생을 선택하세요", options=student_list)
         
-        selected_file = st.selectbox(
-            "👩‍🎓 기록을 열람할 학생을 선택하세요", 
-            options=history_files,
-            format_func=lambda x: student_display_names[x]
-        )
-        
-        # 선택한 학생의 파일 읽기
-        with open(selected_file, "r", encoding="utf-8") as f:
-            student_chats = json.load(f)
+        # 선택한 학생의 데이터를 DB에서 실시간 원격 조회
+        try:
+            student_response = supabase.table("student_chats").select("chats_data").eq("user_id", selected_student).execute()
+            student_chats = student_response.data[0]["chats_data"] if student_response.data else {}
+        except Exception as e:
+            student_chats = {}
+            st.error(f"학생 데이터 로드 실패: {e}")
             
         if not student_chats:
             st.warning("이 학생은 아직 대화 기록이 비어있습니다.")
         else:
-            # 한 학생이 여러 번 접속해서 대화방이 여러 개일 수 있으므로 대화방 선택창 제공
             chat_ids = list(student_chats.keys())
             selected_chat_id = st.selectbox(
                 "💬 열람할 대화방 세션 선택",
@@ -124,21 +133,16 @@ if st.session_state.is_admin:
             )
             
             st.markdown("---")
-            st.markdown(f"### 💬 **{student_display_names[selected_file]}** 학생의 대화방 실시간 모니터링")
+            st.markdown(f"### 💬 **{selected_student}** 학생의 대화방 실시간 모니터링")
             
-            # 선택된 대화방의 메시지 루프를 돌며 실제 챗봇 디자인으로 렌더링
             target_messages = student_chats[selected_chat_id].get("messages", [])
-            
             for msg in target_messages:
                 role = msg.get("role")
                 content = msg.get("content")
-                
                 if role == "user":
-                    # 학생의 말풍선
                     with st.chat_message("user"):
                         st.markdown(content)
                 else:
-                    # AI 튜터의 말풍선 (원래 아이콘인 🧠 장착)
                     with st.chat_message("assistant", avatar="🧠"):
                         st.markdown(content)
                         
@@ -147,28 +151,30 @@ if st.session_state.is_admin:
         st.session_state.logged_in = False
         st.session_state.is_admin = False
         st.rerun()
-        
-    st.stop() # 관리자용 화면 출력 종료
-
+    st.stop()
 
 # ----------------------------------------------------
-# 📂 학생 대화 기록 관리 필수 함수 (여기서부터는 다시 들여쓰기 없음!)
+# 📂 학생 대화 기록 관리 필수 함수 (Supabase 클라우드 버전)
 # ----------------------------------------------------
 user_id = st.session_state.user_id
-HISTORY_FILE = f"chat_history_{user_id}.json"
 
 def load_all_chats():
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return {}
+    try:
+        response = supabase.table("student_chats").select("chats_data").eq("user_id", user_id).execute()
+        if response.data:
+            return response.data[0]["chats_data"]
+    except Exception as e:
+        pass
     return {}
 
 def save_all_chats(chats):
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(chats, f, ensure_ascii=False, indent=4)
+    try:
+        supabase.table("student_chats").upsert({
+            "user_id": user_id,
+            "chats_data": chats
+        }).execute()
+    except Exception as e:
+        st.error(f"💾 클라우드 저장 실패: {e}")
 
 def create_new_chat():
     import datetime as dt
@@ -182,6 +188,7 @@ def create_new_chat():
     st.session_state.current_chat_id = new_id
 
 # ----------------------------------------------------
+
 
 # 2. 구글 API 키 세팅
 try:

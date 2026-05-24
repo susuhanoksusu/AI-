@@ -36,8 +36,8 @@ if "logged_in" not in st.session_state:
     st.session_state.is_admin = False  # 관리자 여부 추가
 
 if not st.session_state.logged_in:
-    st.title("👤 학생/관리자 로그인")
-    st.markdown("자신의 학번/이름과 **비밀번호**를 입력해주세요. (관리자는 '20000선생님' 입력)")
+    st.title("👤 학생 로그인")
+    st.markdown("자신의 학번/이름과 **비밀번호**를 입력해주세요.")
     
     user_id_input = st.text_input("학번/이름 (예: 20401김철수)")
     pw_input = st.text_input("비밀번호", type="password") # 비밀번호 칸 추가

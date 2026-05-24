@@ -20,6 +20,45 @@ try:
 except Exception as e:
     st.error(f"⚠️ 데이터베이스 연결 실패: {e}")
 
+# ----------------------------------------------------
+# 📂 학생 대화 기록 관리 필수 함수 (Supabase 클라우드 버전)
+# ----------------------------------------------------
+
+# [수정] 프로그램 시작 시 에러 방지를 위해 함수 내부에서 실시간으로 가져오도록 변경합니다.
+def load_all_chats():
+    try:
+        current_uid = st.session_state.get("user_id", "")
+        response = supabase.table("student_chats").select("chats_data").eq("user_id", current_uid).execute()
+        if response.data:
+            return response.data[0]["chats_data"]
+    except Exception as e:
+        pass
+    return {}
+
+def save_all_chats(chats):
+    try:
+        current_uid = st.session_state.get("user_id", "")
+        supabase.table("student_chats").upsert({
+            "user_id": current_uid,
+            "chats_data": chats
+        }).execute()
+    except Exception as e:
+        st.error(f"💾 클라우드 저장 실패: {e}")
+
+def create_new_chat():
+    import datetime as dt
+    kst_now = dt.datetime.now(dt.timezone(dt.timedelta(hours=9)))
+    current_uid = st.session_state.get("user_id", "")
+    
+    new_id = kst_now.strftime("%Y%m%d_%H%M%S")
+    st.session_state.all_chats[new_id] = {
+        "title": f"📝 탐구 ({kst_now.strftime('%m/%d %H:%M')})",
+        "messages": [{"role": "assistant", "content": f"반갑습니다 **{current_uid}** 학생! 새로운 문제를 함께 해결해 봅시다. 질문이나 사진을 올려주세요!"}]
+    }
+    st.session_state.current_chat_id = new_id
+
+# ----------------------------------------------------
+
 # --- 🔐 설정 파일 (비밀번호 저장용) 관리 ---
 SETTINGS_FILE = "admin_settings.json"
 
@@ -191,41 +230,6 @@ if st.session_state.is_admin:
         st.rerun()
     st.stop()
 
-# ----------------------------------------------------
-# 📂 학생 대화 기록 관리 필수 함수 (Supabase 클라우드 버전)
-# ----------------------------------------------------
-user_id = st.session_state.user_id
-
-def load_all_chats():
-    try:
-        response = supabase.table("student_chats").select("chats_data").eq("user_id", user_id).execute()
-        if response.data:
-            return response.data[0]["chats_data"]
-    except Exception as e:
-        pass
-    return {}
-
-def save_all_chats(chats):
-    try:
-        supabase.table("student_chats").upsert({
-            "user_id": user_id,
-            "chats_data": chats
-        }).execute()
-    except Exception as e:
-        st.error(f"💾 클라우드 저장 실패: {e}")
-
-def create_new_chat():
-    import datetime as dt
-    kst_now = dt.datetime.now(dt.timezone(dt.timedelta(hours=9)))
-    
-    new_id = kst_now.strftime("%Y%m%d_%H%M%S")
-    st.session_state.all_chats[new_id] = {
-        "title": f"📝 탐구 ({kst_now.strftime('%m/%d %H:%M')})",
-        "messages": [{"role": "assistant", "content": f"반갑습니다 **{user_id}** 학생! 새로운 문제를 함께 해결해 봅시다. 질문이나 사진을 올려주세요!"}]
-    }
-    st.session_state.current_chat_id = new_id
-
-# ----------------------------------------------------
 
 
 # 2. 구글 API 키 세팅

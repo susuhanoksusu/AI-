@@ -118,6 +118,15 @@ if st.session_state.is_admin:
         st.info("아직 클라우드에 대화를 나눈 학생 기록이 없습니다.")
     else:
         selected_student = st.selectbox("👩‍🎓 기록을 열람할 학생을 선택하세요", options=student_list)
+
+        # 🗑️ 학생 데이터 영구 삭제 버튼
+        if st.button(f"🚨 '{selected_student}' 학생 기록 영구 삭제", type="primary", use_container_width=True):
+            try:
+                supabase.table("student_chats").delete().eq("user_id", selected_student).execute()
+                st.toast(f"✅ {selected_student} 학생의 기록이 완전히 삭제되었습니다.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"⚠️ 삭제 실패: {e}")
         
         # 선택한 학생의 데이터를 DB에서 실시간 원격 조회
         try:

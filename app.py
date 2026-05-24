@@ -72,6 +72,12 @@ if not st.session_state.logged_in:
                 st.session_state.user_id = user_input_clean
                 st.session_state.is_admin = False
                 st.session_state.logged_in = True
+                
+                # --- 💡 [여기에 이 한 줄을 추가해 주세요!] ---
+                # 로그인하는 순간, 이 학생의 기존 클라우드 대화 기록이 있다면 가져옵니다.
+                st.session_state.all_chats = load_all_chats()
+                # ---------------------------------------------
+                
                 st.toast(f"✅ {user_input_clean} 학생, 환영합니다!")
                 st.rerun()
     st.stop()
@@ -306,6 +312,11 @@ def delete_chat(chat_id_to_delete):
                 create_new_chat()
                 
         save_all_chats(st.session_state.all_chats)
+
+# 💡 여기에 기존 학생/새 학생 판별 및 안전장치 코드가 들어갑니다!
+if not st.session_state.get("all_chats"):
+    st.session_state.all_chats = {}
+    create_new_chat() # 첫 환영 인사 대화방 개설
 
 # 5. 왼쪽 사이드바 (학생 전용 제어판)
 with st.sidebar:

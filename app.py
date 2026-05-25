@@ -245,9 +245,7 @@ except Exception:
 # 중괄호{ }가 들어간 수식 충돌을 막기 위해 파일을 미리 읽어둡니다.
 try:
     with open("8. 수학1_핵심 풀이 전략.md", "r", encoding="utf-8") as f:
-        su1_strategy_1 = f.read()
-    with open("9. 수학1 풀이 핵심 전략2.md", "r", encoding="utf-8") as f:
-        su1_strategy_2 = f.read()
+        su1_strategy = f.read() # 변수명 1, 2 구분 제거
     with open("10. 수학2 문제풀이 핵심 전략.md", "r", encoding="utf-8") as f:
         su2_strategy = f.read()
 except FileNotFoundError as e:
@@ -255,7 +253,7 @@ except FileNotFoundError as e:
     st.stop()
 
 
-# 3. 수학Ⅰ·Ⅱ 통합 범용 M-CoT 시스템 프롬프트 v3.0 (치환형 베이스)
+# 3. 수학Ⅰ·Ⅱ 통합 범용 M-CoT 시스템 프롬프트 v3.0 (최적화 버전)
 BASE_SYSTEM_INSTRUCTION = """
 # Role (역할)  
 당신은 고등학교 수학Ⅰ(지수로그·삼각함수·수열) 및 수학Ⅱ(극한·미분·적분)를 전담하는 전문적이고 친절한 'M-CoT(단계별 수학적 추론) 기반 AI 튜터'입니다.   
@@ -273,11 +271,8 @@ BASE_SYSTEM_INSTRUCTION = """
 ==================================================
 [🚨 기출 분석 핵심 전략 데이터베이스 - 학생 출력 금지]
 
-■ 수학Ⅰ 핵심 풀이 전략 원문 (1)
-[SU1_STRATEGY_PLACEHOLDER_1]
-
-■ 수학Ⅰ 핵심 풀이 전략 원문 (2)
-[SU1_STRATEGY_PLACEHOLDER_2]
+■ 수학Ⅰ 핵심 풀이 전략 원문
+[SU1_STRATEGY_PLACEHOLDER]
 
 ■ 수학Ⅱ 핵심 풀이 전략 원문
 [SU2_STRATEGY_PLACEHOLDER]
@@ -298,7 +293,7 @@ BASE_SYSTEM_INSTRUCTION = """
 - 목표: 세워진 모델을 바탕으로 연산, 역추적, 또는 모순을 발견하며 답을 도출하게 함. (학생이 막힐 때만 부분 힌트 제공)  
 - AI 발문 예시: "맞아요! 그럼 우리가 나눈 두 가지 케이스 중, 문제의 조건(예: f(1)>0)에 모순이 발생하여 탈락하는 케이스는 어느 것일까요?"
 
-[Step 4: Antiquity 검증 (Verification)]  
+[Step 4: 결과 검증 (Verification)]  
 - 목표: 도출된 답이 문제의 초기 조건에 부합하는지 비판적으로 확인.  
 - AI 발문 예시: "훌륭하게 답을 구했네요! 마지막으로, 지금 구한 값들이 '모든 항이 정수'라는 맨 처음 조건에 완벽하게 부합하는지 대입해서 스스로 검증해 볼까요?"
 
@@ -321,8 +316,7 @@ BASE_SYSTEM_INSTRUCTION = """
 """
 
 # 수식 깨짐 방지를 위해 안전하게 치환(.replace)하여 최종 프롬프트 완성
-SYSTEM_INSTRUCTION = BASE_SYSTEM_INSTRUCTION.replace("[SU1_STRATEGY_PLACEHOLDER_1]", su1_strategy_1)\
-                                            .replace("[SU1_STRATEGY_PLACEHOLDER_2]", su1_strategy_2)\
+SYSTEM_INSTRUCTION = BASE_SYSTEM_INSTRUCTION.replace("[SU1_STRATEGY_PLACEHOLDER]", su1_strategy)\
                                             .replace("[SU2_STRATEGY_PLACEHOLDER]", su2_strategy)
 
 # 4. 데이터 초기화 (기존 유저면 HISTORY_FILE에서 대화 내역이 자동으로 로드됨)

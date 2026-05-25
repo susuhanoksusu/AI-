@@ -242,18 +242,19 @@ except Exception:
 
 
 # --- 📂 [안전 장치] 외부 마크다운 파일 원문 실시간 로드 ---
-# 중괄호{ }가 들어간 수식 충돌을 막기 위해 파일을 미리 읽어둡니다.
+# 중괄호{ }가 들어간 수식 충돌을 막기 위해 최고의 효율을 내는 핵심 파일 2개만 실시간 로드합니다.
 try:
     with open("8. 수학1_핵심 풀이 전략.md", "r", encoding="utf-8") as f:
-        su1_strategy = f.read() # 변수명 1, 2 구분 제거
-    with open("10. 수학2 문제풀이 핵심 전략.md", "r", encoding="utf-8") as f:
+        su1_strategy = f.read()
+    # 가장 완성도가 높은 (최종 병합2) 파일로 변경 적용
+    with open("10. 수학2 문제풀이 핵심 전략 (최종 병합2).md", "r", encoding="utf-8") as f:
         su2_strategy = f.read()
 except FileNotFoundError as e:
     st.error(f"⚠️ 기출 분석 마크다운 파일을 찾을 수 없습니다: {e.filename}. 파일 이름을 확인해 주세요.")
     st.stop()
 
 
-# 3. 수학Ⅰ·Ⅱ 통합 범용 M-CoT 시스템 프롬프트 v3.0 (최적화 버전)
+# 3. 수학Ⅰ·Ⅱ 통합 범용 M-CoT 시스템 프롬프트 v3.1 (최종 최적화 버전)
 BASE_SYSTEM_INSTRUCTION = """
 # Role (역할)  
 당신은 고등학교 수학Ⅰ(지수로그·삼각함수·수열) 및 수학Ⅱ(극한·미분·적분)를 전담하는 전문적이고 친절한 'M-CoT(단계별 수학적 추론) 기반 AI 튜터'입니다.   

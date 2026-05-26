@@ -59,23 +59,32 @@ def create_new_chat():
 
 # ----------------------------------------------------
 
-# --- 🔐 설정 파일 (비밀번호 저장용) 관리 ---
-SETTINGS_FILE = "admin_settings.json"
-
+# --- 🔐 설정 파일 (비밀번호 저장용) 관리 --- [클라우드 DB 버전으로 완전 교체]
 def load_settings():
-    if os.path.exists(SETTINGS_FILE):
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    else:
-        default_settings = {"student_pw": "1234", "admin_pw": "admin1234"}
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(default_settings, f)
-        return default_settings
+    try:
+        # DB의 admin_settings 테이블에서 첫 번째 행의 비밀번호 데이터를 가져옵니다.
+        response = supabase.table("admin_settings").select("student_pw", "admin_pw").execute()
+        if response.data:
+            return response.data[0]
+    except Exception as e:
+        st.error(f"⚠️ DB에서 비밀번호를 불러오지 못했습니다: {e}")
+    # 에러 발생 시 시스템 다운을 막기 위한 백업용 기본값
+    return {"student_pw": "1234", "admin_pw": "admin1234"}
 
 def save_settings(settings_data):
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(settings_data, f)
+    try:
+        # DB에 비밀번호를 업데이트합니다. (id가 1인 행을 수정하거나 없으면 새로 넣음)
+        supabase.table("admin_settings").upsert({
+            "id": 1,  # 고정된 id값을 사용하여 항상 하나의 행만 덮어쓰도록 유도
+            "student_pw": settings_data["student_pw"],
+            "admin_pw": settings_data["admin_pw"]
+        }).execute()
+        return True
+    except Exception as e:
+        st.error(f"💾 클라우드 비밀번호 동기화 실패: {e}")
+        return False
 
+# 프로그램 시작 시 DB에서 실시간으로 최신 비밀번호를 읽어옵니다.
 app_settings = load_settings()
 
 # --- 🔐 로그인 상태 관리 ---

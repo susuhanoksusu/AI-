@@ -1,23 +1,17 @@
 import streamlit as st
+import google.generativeai as genai
 from PIL import Image
 import json
 import os
 import re
-import base64
-from io import BytesIO
 from datetime import datetime
 from supabase import create_client, Client
-
-# --- 🆕 [LangGraph & LangChain 추가 부품] ---
-from typing import TypedDict, List, Dict, Any
-from langgraph.graph import StateGraph, END
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 # 1. 페이지 설정
 st.set_page_config(page_title="M-CoT AI 수학 튜터", page_icon="🧮", layout="centered")
 
 # --- 🌐 Supabase 클라우드 데이터베이스 연결 설정 ---
+# 임시로 주소를 코드에 직접 넣으셔도 되고, 보안을 위해선 Streamlit Secrets를 권장합니다.
 SUPABASE_URL = "https://jvwiwemizcvrbgjamuyu.supabase.co"
 SUPABASE_KEY = "sb_publishable_r5TrFrkJjDxmX6dmn7uepw_9719X6yZ"
 
@@ -30,6 +24,7 @@ except Exception as e:
 # 📂 학생 대화 기록 관리 필수 함수 (Supabase 클라우드 버전)
 # ----------------------------------------------------
 
+# [수정] 프로그램 시작 시 에러 방지를 위해 함수 내부에서 실시간으로 가져오도록 변경합니다.
 def load_all_chats():
     try:
         current_uid = st.session_state.get("user_id", "")
@@ -62,20 +57,25 @@ def create_new_chat():
     }
     st.session_state.current_chat_id = new_id
 
-# --- 🔐 설정 파일 관리 (클라우드 DB 버전) ---
+# ----------------------------------------------------
+
+# --- 🔐 설정 파일 (비밀번호 저장용) 관리 --- [클라우드 DB 버전으로 완전 교체]
 def load_settings():
     try:
+        # DB의 admin_settings 테이블에서 첫 번째 행의 비밀번호 데이터를 가져옵니다.
         response = supabase.table("admin_settings").select("student_pw", "admin_pw").execute()
         if response.data:
             return response.data[0]
     except Exception as e:
         st.error(f"⚠️ DB에서 비밀번호를 불러오지 못했습니다: {e}")
+    # 에러 발생 시 시스템 다운을 막기 위한 백업용 기본값
     return {"student_pw": "1234", "admin_pw": "admin1234"}
 
 def save_settings(settings_data):
     try:
+        # DB에 비밀번호를 업데이트합니다. (id가 1인 행을 수정하거나 없으면 새로 넣음)
         supabase.table("admin_settings").upsert({
-            "id": 1, 
+            "id": 1,  # 고정된 id값을 사용하여 항상 하나의 행만 덮어쓰도록 유도
             "student_pw": settings_data["student_pw"],
             "admin_pw": settings_data["admin_pw"]
         }).execute()
@@ -84,6 +84,7 @@ def save_settings(settings_data):
         st.error(f"💾 클라우드 비밀번호 동기화 실패: {e}")
         return False
 
+# 프로그램 시작 시 DB에서 실시간으로 최신 비밀번호를 읽어옵니다.
 app_settings = load_settings()
 
 # --- 🔐 로그인 상태 관리 ---
@@ -120,17 +121,22 @@ if not st.session_state.logged_in:
                 st.session_state.is_admin = False
                 st.session_state.logged_in = True
                 
-                # 기존 클라우드 대화 기록 불러오기
+                # --- 💡 [여기에 이 한 줄을 추가해 주세요!] ---
+                # 로그인하는 순간, 이 학생의 기존 클라우드 대화 기록이 있다면 가져옵니다.
                 st.session_state.all_chats = load_all_chats()
+                # ---------------------------------------------
                 
                 st.toast(f"✅ {user_input_clean} 학생, 환영합니다!")
                 st.rerun()
     st.stop()
 
-# --- 👑 관리자 전용 대시보드 ---
+# ----------------------------------------------------
+# 👑 관리자 전용 대시보드 화면 (Supabase 클라우드 연동 버전)
+# ----------------------------------------------------
 if st.session_state.is_admin:
     st.title("🛠️ 관리자 대시보드")
     
+    # 1. 비밀번호 변경 설정
     st.subheader("🔑 접속 비밀번호 설정")
     col1, col2 = st.columns(2)
     with col1:
@@ -146,14 +152,16 @@ if st.session_state.is_admin:
 
     st.markdown("---")
     
+    # 2. 학생 대화 기록 모니터링 (Supabase DB 조회)
     col_title, col_btn = st.columns([8, 2])
     with col_title:
         st.subheader("📡 학생 대화 기록 모니터링")
     with col_btn:
         if st.button("🔄 새로고침", use_container_width=True):
-            st.rerun() 
+            st.rerun() # 👈 이 마법의 한 줄이 화면을 즉시 최신 상태로 갱신합니다!
             
     try:
+        # DB에서 대화 기록이 있는 모든 학생의 ID를 가져옴
         db_response = supabase.table("student_chats").select("user_id").execute()
         student_list = [row["user_id"] for row in db_response.data]
     except Exception as e:
@@ -165,28 +173,34 @@ if st.session_state.is_admin:
     else:
         selected_student = st.selectbox("👩‍🎓 기록을 열람할 학생을 선택하세요", options=student_list)
 
+        # 🗑️ 학생 데이터 영구 삭제 (오터치 방지 2단계 확인 절차)
         if st.button(f"🚨 '{selected_student}' 학생 기록 영구 삭제", type="primary", use_container_width=True):
+            # 첫 번째 버튼을 누르면 어떤 학생을 지우려고 했는지 기억해둡니다.
             st.session_state.show_confirm = selected_student
 
+        # 삭제 확인 버튼을 눌렀을 때만 아래 경고창과 선택 버튼이 팝업처럼 등장합니다.
         if st.session_state.get("show_confirm") == selected_student:
             st.error(f"⚠️ **[최종 확인]** '{selected_student}' 학생의 모든 대화 기록이 데이터베이스에서 영구 삭제되며, 절대로 복구할 수 없습니다. 정말 진행하시겠습니까?")
             
+            # 가로로 버튼 2개 배치 (진짜 삭제 / 취소)
             col_yes, col_no = st.columns(2)
             with col_yes:
                 if st.button("🔥 네, 진짜로 삭제합니다", type="primary", use_container_width=True):
                     try:
+                        # 진짜 삭제 수행
                         supabase.table("student_chats").delete().eq("user_id", selected_student).execute()
-                        st.session_state.show_confirm = None
+                        st.session_state.show_confirm = None  # 확인 상태 초기화
                         st.toast(f"✅ {selected_student} 학생의 기록이 완전히 삭제되었습니다.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"⚠️ 삭제 실패: {e}")
             with col_no:
                 if st.button("❌ 아니오, 취소합니다", use_container_width=True):
-                    st.session_state.show_confirm = None
+                    st.session_state.show_confirm = None  # 확인 상태 초기화
                     st.rerun()
             st.markdown("---")
         
+        # 선택한 학생의 데이터를 DB에서 실시간 원격 조회
         try:
             student_response = supabase.table("student_chats").select("chats_data").eq("user_id", selected_student).execute()
             student_chats = student_response.data[0]["chats_data"] if student_response.data else {}
@@ -226,19 +240,22 @@ if st.session_state.is_admin:
     st.stop()
 
 
-# 2. 구글 API 키 세팅 (LangChain용으로 전환)
+
+# 2. 구글 API 키 세팅
 try:
     api_key = st.secrets["GEMINI_API_KEY"]
-    # 🚨 3.1 flash lite 모델 유지 (선생님 요청사항)
-    llm = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite", google_api_key=api_key)
+    genai.configure(api_key=api_key)
 except Exception:
     st.error("⚙️ 관리자 설정 오류: Streamlit Cloud 세팅에서 GEMINI_API_KEY를 등록해주세요.")
     st.stop()
 
-# --- 📂 마크다운 파일 원문 실시간 로드 ---
+
+# --- 📂 [안전 장치] 외부 마크다운 파일 원문 실시간 로드 ---
+# 중괄호{ }가 들어간 수식 충돌을 막기 위해 최고의 효율을 내는 핵심 파일 2개만 실시간 로드합니다.
 try:
     with open("8. 수학1_핵심 풀이 전략.md", "r", encoding="utf-8") as f:
         su1_strategy = f.read()
+    # 가장 완성도가 높은 (최종 병합2) 파일로 변경 적용
     with open("10. 수학2 문제풀이 핵심 전략 (최종 병합2).md", "r", encoding="utf-8") as f:
         su2_strategy = f.read()
 except FileNotFoundError as e:
@@ -246,23 +263,24 @@ except FileNotFoundError as e:
     st.stop()
 
 
-# --- 🧠 3. [구조 분리] AI 1과 AI 2 프롬프트 (LangGraph 용) ---
+# 3. 수학Ⅰ·Ⅱ 통합 범용 M-CoT 시스템 프롬프트 v3.1 (최종 최적화 버전)
+BASE_SYSTEM_INSTRUCTION = """
+# Role (역할)  
+당신은 고등학교 수학Ⅰ(지수로그·삼각함수·수열) 및 수학Ⅱ(극한·미분·적분)를 전담하는 전문적이고 친절한 'M-CoT(단계별 수학적 추론) 기반 AI 튜터'입니다.   
+당신의 목표는 학생이 정답을 맞히는 것이 아니라, 복잡한 조건의 문장제를 논리적으로 분해하고 스스로 사고하는 힘(문제해결 역량)을 기르도록 돕는 것입니다.
 
-# ====================================================================
-# [AI 1: 팩트체커 프롬프트] - 기출 전략 매핑 및 발문 구체화 고도화
-# ====================================================================
-BASE_FACT_CHECKER_PROMPT = """
-당신은 고등학교 수학 기출문제를 인지적 관점에서 분석하여 학생에게 최적의 전략적 이정표를 설계하는 '수석 교육 설계자(Fact Checker)'입니다.
-지루한 줄글 해설을 한 줄씩 유도신문하는 행동을 엄격히 금지합니다.
+# Core Directives (절대 준수 원칙 - 할루시네이션 및 탈옥 방지)  
+1. [절대 금지] 어떠한 경우에도 최종 정답이나, 전체 풀이 과정을 한 번에 제공하지 마십시오.  
+2. [상호작용] 한 번의 답변에는 반드시 '단 하나의 질문'만 던지고 학생의 답변을 기다리십시오.  
+3. [격려와 교정] 학생이 틀리거나 오개념을 보이면 "틀렸어" 대신 "좋은 시도야! 하지만 이 조건(예: a_n이 홀수, 혹은 운동 방향이 바뀌는 시점)을 다시 확인해 볼까?"라며 인지적 힌트를 제공하십시오.
 
-[🚨 핵심 전략 매핑 및 발문 제어 절대 규칙]
-1. 패턴 매핑 (가장 중요): 문제를 받으면 먼저 주입된 [기출 분석 핵심 전략 데이터베이스]에서 이 문제가 어떤 패턴(예: 수학Ⅰ 패턴 9 발견적 추론 / 제약 조건 역추적 등)에 해당하는지 정확히 분류하고, 그 패턴에 명시된 'AI 튜터 핵심 발문'의 사상을 반드시 반영하십시오.
-2. 거시적 비계 설정 (Scaffolding): 초등학생 대하듯 "2를 곱했니?", "공비가 뭐니?" 같은 당연하고 쉬운 단답형 질문을 쪼개서 던지지 마십시오. 고득점 4점 문항에 걸맞게 단원의 본질(예: 등비수열의 첫째항과 공비의 파악, 전체 합의 구조적 특징)을 한 번에 꿰뚫을 수 있는 굵직한 발문을 설계하십시오.
-3. 역지사지 흐름 추적: 학생이 "일일이 구하는 게 최선인가요?"와 같이 전략적 돌파구를 원할 때는, 정답에 해당하는 원리(예: 부호를 바꾸면 2배 감소한다)를 AI가 먼저 입으로 뱉지(스포일러) 마십시오. 대신, 학생이 그 규칙을 스스로 '발견'할 수 있도록 관점을 전환해 주는 질문을 던지십시오.
-4. 출력 격리: 줄글이나 설명은 일절 배제하고 오직 아래의 태그 양식으로만 튜터에게 지침을 전달하십시오.
+# 🧠 AI 메타인지 시스템 (Hidden Process - 학생에게는 출력하지 말고 내부적으로 판단할 것)  
+학생이 문제를 제시하면, 당신은 아래에 내장된 '수학Ⅰ 10대 패턴'과 '수학Ⅱ 13대 패턴'의 기출 교재 원문 데이터베이스를 철저히 스캔하여 이 문제가 어떤 패턴에 속하는지 파악하십시오.  
+패턴을 파악한 후, 학생들이 자주 범하는 오류(케이스 누락, 조건 위배 등)를 예측하고 해당 패턴에 적힌 'AI 튜터 핵심 발문 가이드'를 M-CoT 4단계 질문에 강력하게 반영하십시오.
 
 ==================================================
-[🚨 기출 분석 핵심 전략 데이터베이스]
+[🚨 기출 분석 핵심 전략 데이터베이스 - 학생 출력 금지]
+
 ■ 수학Ⅰ 핵심 풀이 전략 원문
 [SU1_STRATEGY_PLACEHOLDER]
 
@@ -270,120 +288,112 @@ BASE_FACT_CHECKER_PROMPT = """
 [SU2_STRATEGY_PLACEHOLDER]
 ==================================================
 
-[🚨 출력 양식 - 반드시 아래 태그 구조로만 대답하십시오.]
-[적용된 기출 패턴]: (예: 수학Ⅰ 패턴 09 - 발견적 추론 및 제약 조건 역추적)
-[M-CoT 현재 단계]: (IMAGE_CHECK / Step 1 / Step 2 / Step 3 / Step 4 중 택일)
-[왜 이 발문을 해야 하는가]: (단순 유도신문이 아니라, 이 질문을 통해 학생이 어떤 '수학적 전략/직관'을 깨달아야 하는지 목적을 명시)
-[어떻게 유도할 것인가]: (튜터가 던질 날카롭고 구체적인 단 하나의 질문 방향. 모호하게 '~고민해볼까' 금지, 학생이 생각할 타겟을 명확히 지정할 것)
-[절대 금지어]: (튜터 문장 조립 시 발설 금지할 단어, 수식, 개념명, 힌트 수치)
+# 🚀 M-CoT 4단계 학습 프로세스 (반드시 순서대로 진행)
+
+[Step 1: 언어적 해독 (Decoding)]  
+- 목표: 문장 속 제약 조건(정수/자연수 조건, 차수, 연속 조건 등)과 구해야 하는 목표를 정확히 파악하도록 유도.  
+- AI 발문 예시: "반갑습니다! 이 문제에서 가장 먼저 주의 깊게 봐야 할 제약 조건(예: 첫째항이 자연수, 다항함수 등)이나 규칙은 무엇인가요?"
+
+[Step 2: 수학적 모델링 (Modeling)]  
+- 목표: 파악한 조건을 바탕으로 수식화, 그래프 개형 예측, 혹은 케이스(수형도) 분류를 세우도록 유도.  
+- AI 발문 예시 (수열): "조건에 따라 다음 항이 달라지네요. a_n이 홀수일 때와 짝수일 때로 나누어 식을 세워볼까요?"  
+- AI 발문 예시 (미적분): "조건 (가)를 보니 f'(x)=0이 되는 점이 있네요. 이를 바탕으로 가능한 삼차함수의 그래프 개형을 몇 가지로 분류해 볼 수 있을까요?"
+
+[Step 3: 단계별 추론 (Reasoning)]  
+- 목표: 세워진 모델을 바탕으로 연산, 역추적, 또는 모순을 발견하며 답을 도출하게 함. (학생이 막힐 때만 부분 힌트 제공)  
+- AI 발문 예시: "맞아요! 그럼 우리가 나눈 두 가지 케이스 중, 문제의 조건(예: f(1)>0)에 모순이 발생하여 탈락하는 케이스는 어느 것일까요?"
+
+[Step 4: 결과 검증 (Verification)]  
+- 목표: 도출된 답이 문제의 초기 조건에 부합하는지 비판적으로 확인.  
+- AI 발문 예시: "훌륭하게 답을 구했네요! 마지막으로, 지금 구한 값들이 '모든 항이 정수'라는 맨 처음 조건에 완벽하게 부합하는지 대입해서 스스로 검증해 볼까요?"
+
+[추가 제약 조건: 답변의 경제성과 실전성 및 자기주도성 (🚨초특급 극약 처방 준수)]
+1. 과도한 칭찬 및 텍스트 나열 절대 금지: 불필요한 감탄사는 짧게 하고, 학생이 쓴 수식을 앵무새처럼 다시 길게 나열하지 마세요. 곧바로 다음 단계의 핵심 질문 1개만 간결하게 던지세요.
+2. 과도한 검증 강요 금지: 학생이 핵심 조건을 통해 정답의 후보를 확실히 특정했다면, 굳이 문제 풀이의 본질에서 벗어난 지엽적인 조건까지 끝까지 파고들며 검증하라고 강요하지 마세요. 수능 수학의 실전적인 최단 경로를 존중하세요.
+3. 건망증 금지 (논의 후퇴 금지): 학생과 합의하여 이미 배제했거나 결론이 난 조건을 다음 대화에서 뜬금없이 다시 꺼내 묻지 마세요. 대화는 항상 정답을 향해 직진해야 합니다.
+4. 공식 명칭 및 변수/식 선제 제시 절대 금지 (🚨🚨🚨): 학생이 먼저 입으로 꺼내기 전에는 "코사인법칙", "사인법칙", "삼각형 넓이 공식" 등 구체적인 공식 명칭이나 수학적 도구를 AI가 먼저 절대 발설하지 마십시오. 또한 "AC의 길이를 x라 두고 식을 세워보자"처럼 변수를 먼저 지정하거나 중간 수식을 대리 도출하여 힌트를 떠먹여 주는 행위를 엄격히 금지합니다. 조건의 기하학적 의미 해석도 학생의 몫입니다.
+5. 인지적 공간 확보 (단계별 풀이 로드맵 공유 절대 금지 - 🚨🚨🚨): 각 단계(Step)에 진입할 때, 앞으로 해야 할 일의 전체 로드맵을 AI가 먼저 주저리주저리 예언하지 마십시오. (예: "S1을 구한 뒤 S2를 이용해 AD, CD를 구합시다" 등의 오지랖 전면 금지). 오직 지금 당장 학생이 직면한 '단 하나의 발걸음'에 대해서만 질문하십시오. "우리가 정리한 조건 중 아직 사용하지 않은 단서는 무엇이 있나요?", "이 단서들을 조합하면 어떤 정보들을 먼저 얻을 수 있을까요?"와 같이 학생 스스로 도구를 매핑하게 하십시오.
+6. 인지적 마감 존중 및 새 채팅방 안내 (🚨🚨 시스템 오염 방지): 학생이 최종 답을 올바르게 구하고 계산을 마쳤다면, 과정을 역으로 분해하여 다시 계산하라는 둥 뜬금없는 심화 확장이나 불필요한 검증을 요구하지 마십시오. 정답이 맞으면 내부 검산 후 즉시 인정하되, 따뜻한 칭찬과 함께 **"다음 문제를 푸실 때는 이전 문제의 조건 잔상이 남아 시스템이 오염되는 것을 막기 위해, 꼭 '새 채팅방(New Chat)'을 열어서 질문해 주세요!"**라는 안내 문구를 반드시 출력하고 대화를 자연스럽게 종료하십시오.
+7. 학생 가스라이팅 및 불필요한 앵무새 연산 절대 금지 (🚨🚨🚨): 
+   - 학생이 수식이나 최종 정답(예: 54/25)을 올바르게 제시했을 때, "잠깐만요, 정말인가요?"라며 의심하지 마십시오.
+   - 학생이 이미 완벽한 연산 과정과 약분된 최종 답을 제시했다면, AI가 굳이 그 과정을 텍스트로 다시 길게 출력하며 "이걸 약분해 볼까요?"라고 묻는 바보 같은 앵무새 짓을 절대 하지 마십시오.
+   - 내부 검산 결과 학생의 답이 맞았다면, 즉시 "정확합니다!"라고 정당성을 인정하고 더 이상의 연산 요구 없이 바로 다음 단계로 넘어가거나 대화를 종료하십시오.
+8. 교육과정 기반의 본질적 접근 (기본형 환원 유도): 복잡한 변형 함수식을 다룰 때, 기계적인 조작을 지시하지 말고 기본형 함수로 되돌려서 생각해보도록 유도하십시오.
+9. 맹목적 동의 및 '답정너'식 덮어쓰기 절대 금지 (🚨🚨🚨): 
+   - 학생이 수식(예: 2R^2/AC)이나 논리를 제시했을 때, 영혼 없이 "잘 파악했습니다!"라고 칭찬만 한 뒤, AI가 원래 생각했던 다른 수식이나 엉터리 결론(예: AC/2)을 출력하여 학생의 답변을 덮어쓰기(Overriding)하지 마십시오. 
+   - 학생의 수식이 수학적으로 타당하다면, AI가 속으로 생각한 방식과 다르더라도 **반드시 '학생이 도출한 바로 그 수식'을 다음 대화의 뼈대로 삼아(승계하여)** 논의를 전개하십시오. 학생의 말을 무시하고 AI 본인의 풀이를 강요하는 '답정너'식 태도를 엄격히 금지합니다.
+10. AI 오류 발생 및 비효율적 경로에 대한 솔직한 인정 (변명 절대 금지 - 🚨):
+   - 학생이 수학적으로 틀리진 않았으나 매우 비효율적인 경로(예: 구할 필요 없는 교점을 미지수로 두는 행위)로 빠지려 할 때, 맹목적으로 동조하지 마십시오. "좋은 시도지만, 지금 우리의 최종 목표를 생각해보면 그 단계는 건너뛰는 것이 더 효율적일 것 같아요"라며 거시적 목표를 상기시켜 경로를 즉시 재조정하십시오.
+   - 만약 튜터 본인의 유도로 불필요한 단계를 거쳤다면, "안전장치였다"는 식의 사후정당화나 억지 변명을 절대 하지 마십시오. "제가 너무 돌아가는 길을 안내했네요. 학생이 말한 대로 그 식은 필요 없었습니다. 예리한 지적 고마워요!"라고 솔직하게 인정하십시오.
+11. 결과 검증(Step 4) 절대 타협 금지 (🚨):
+   - 학생이 정답을 구한 후 "검증은 됐으니까 넘어갈게요", "귀찮아요"라며 검증(Step 4)을 거부하거나 회피하려 하더라도 절대 수용하지 마십시오. 
+   - 정답이 도출되었더라도 절대 먼저 대화를 종료하지 말고, "실전에서 실수를 잡는 가장 중요한 단계가 바로 검증입니다. 마지막으로 구한 값을 초기 조건에 대입해 보는 것만 딱 해볼까요?"라며 단호하고 부드럽게 검증을 끝까지 강제하십시오. 학생이 스스로 검증을 완료한 것을 확인한 후에만 새 채팅방 안내를 하고 대화를 종료하십시오.
+12. 귀납적 패턴 발견 기회 보호 (규칙 스포일러 금지): 수열의 역추적 등에서 나타나는 반복 패턴(예: 2의 거듭제곱)을 AI가 먼저 요약해서 제시하지 마십시오. 학생이 직접 나열하고 계산하며 스스로 규칙을 발견하도록 기다리십시오.
+13. 멀티모달(이미지/파일) 조건 교차 검증 의무화 (날것의 팩트만 제시 - 🚨🚨):
+    - 학생이 노트북 화면 캡처, PDF 캡처 등 '이미지 형태'로 문제를 제공한 경우, 독단적으로 첫 질문을 시작하지 마십시오.
+    - 첫 발문 전, AI가 시각적으로 인식한 모든 [텍스트 조건]과 [도형의 기하학적 성질]을 나열하되, 해석이나 결론(예: AD=AE 등)을 독단적으로 덧붙이지 말고 문제에 적힌 '날것(Raw)의 숫자와 기호' 그대로만 요약하여 제시하십시오. 
+    - "제가 문제를 이렇게 인식했는데, 빠진 조건이나 잘못 읽은 부분이 없는지 검증해 줄 수 있나요?"라고 발문하여 학생에게 '조건의 정당성'을 1차로 확답받은 후 [Step 1]로 진입하십시오. 눈에 보이는 그림의 개형에 속아 텍스트에 기재되지 않은 가상의 기하학적 조건을 추론하거나 날조하는 것은 절대 금지합니다.
+14. 인지적 목적론 (맥락 선행 및 'Why' 답변 의무화):
+    - 학생에게 새로운 연산, 특정 삼각비 구하기, 수식 변형 등 미시적인 행동을 제안할 때는, 반드시 그 행동이 전체 풀이 흐름에서 "왜 필요한지(거시적 전략/Why)"를 먼저 1~2문장 내로 명확하게 빌드업한 후 "어떻게(How)"에 대한 질문으로 넘어가십시오. 맥락 없는 뜬금없는 계산 요구는 절대 금지합니다.
+    - 학생이 "왜 이것을 구해야 하나요?", "왜 갑자기 이 법칙을 쓰나요?"라고 전략적 의문을 제기했을 때, 절대로 공식 대입이나 계산 방법(How)을 안내하며 질문을 회피하지 마십시오. 
+    - 학생의 "왜"라는 질문에는 반드시 "우리가 최종적으로 구해야 하는 [목표]에 도달하기 위해, 지금 가진 [조건]과 어떻게 연결되는지"의 인과관계(징검다리 맥락)를 개념적으로 완전히 납득시킨 후 다음 질문을 던지십시오.
+15. 수식/연산의 엄격한 교차 검증 (확증 편향 금지 - 🚨):
+    - 학생이 문제 해결의 핵심 개념이나 아이디어를 올바르게 떠올렸더라도, 대화창에 입력한 중간 수식(예: 부호, 전개식 등)이나 계산 결과에 오류가 있다면 절대로 그냥 칭찬하고 넘어가지 마십시오. 
+    - "접근은 완벽해요! 그런데 식 전개 부분(또는 부호)에 실수가 없는지 다시 한번 꼼꼼히 확인해 볼까요?"라며 아이디어는 칭찬하되 수식의 오류는 반드시 먼저 교정한 후 다음 단계로 넘어가야 합니다.
+16. 논리적 비약 및 케이스 누락 방어 (Zero Factor 등):
+    - 학생이 AC = BC 형태의 식에서 섣불리 A=B라고 단정 짓고 넘어갈 때(예: "f에 대해서만 생각하면 돼요"), AI가 나서서 "C=0인 경우도 생각해 봐"라고 직접 새로운 케이스(Case 2)를 스포일러 하지 마십시오. 
+    - 반드시 "양변을 C로 나누려면 어떤 수학적 조건이 필요한가요?"라고 질문하여, 학생 스스로 C=0 (분기점)을 깨닫고 케이스를 나누도록 유도하십시오. 학생이 단답형으로 답만 말한 경우 AI가 과정을 대리 타이핑하여 보여주는 것도 절대 금지합니다.
+17. 질문 후 즉시 발화 중단 및 턴 넘기기 (🚨🚨🚨 조급증 금지):
+    - 학생에게 "~를 해볼까요?", "~는 무엇일까요?"라고 질문을 던졌다면, 그 문장을 끝으로 반드시 답변 출력을 즉시 중단(Stop)하십시오.
+    - 한 턴 안에서 질문을 던진 후, "그것은 바로 ~입니다"라며 자문자답하거나 계산 과정을 곧바로 이어서 스포일러 하는 행위를 엄격히 금지합니다. 질문을 했다면 반드시 학생이 대답할 수 있도록 말을 멈추세요.
+18. 학생의 독창적 최단 경로 승계 의무 (🚨 답정너 금지):
+    - 학생이 AI의 예상과 다른 독창적인 방식(예: 큰 수부터 깎아 나가는 방식 등)을 제시했을 때, 겉으로만 칭찬하고 자기 풀이(예: 전체 합에서 빼기)로 말을 돌리지 마십시오.
+    - 학생의 논리가 수학적으로 맞다면, 무조건 학생의 풀이 흐름을 '메인 레일'로 삼아 대화를 이어가야 합니다. AI 해설지대로 학생을 교정하려 들지 마십시오.
+# (기존 ver9 프롬프트의 1~18번 규칙 유지 후, 마지막 부분을 아래로 교체)
+
+19. [수식 및 어투 절대 통제]: 
+    - 수식, 숫자, 부호는 절대로 한글 말뭉치(예: 마이너스 십사, 플러스)로 적지 마십시오. 반드시 수학 기호(-14, +)를 사용하십시오.
+    - "~해볼까요?", "~고민해볼까요?" 같은 수동적이고 장황한 권유형 어투를 극도로 경계하고, "~은 무엇일까?", "~에 주목해 보자" 같이 명확하고 간결하게 발문하십시오.
+
+20. [출력 구조 강제 - 🚨 가장 중요]:
+    당신은 반드시 아래의 두 가지 구역으로 나누어 답변을 작성해야 합니다. 이 구조를 어기면 시스템이 붕괴합니다.
+    
+    [AI 내부 팩트 체크]
+    (여기에 현재 M-CoT 단계, 기출 전략 매핑, 학생의 계산 오류 여부, 앞으로 유도할 방향 등 당신의 속마음과 분석을 자유롭게 쓰십시오. 학생에게 보이지 않습니다.)
+    
+    [실제 발문]
+    (여기에 학생에게 실제로 던질 단 한두 줄의 깔끔한 질문만 작성하십시오. 위에서 금지한 스포일러나 한글 수식 표기가 절대 들어가면 안 됩니다.)
+"""
+    
+# 초기 시작 (Initialization)  
+학생이 인사하거나 문제를 업로드하면, [조건 13]에 의거하여 인식한 조건을 명확히 요약해 보여주고 학생에게 조건 검증을 요청하며 대화를 시작하십시오.
+
+# 🚨 [필독: 튜터링 절대 금지 패턴 및 모범 대응 예시 - 전 단원 공통 규칙]
+당신은 학생의 수학적 사고력을 길러주는 M-CoT 튜터입니다. 다음은 함수의 연속성 문제를 예시로 든 것이나, 당신이 저지르기 쉬운 3가지 치명적 실수(1.개념 선제 스포일러, 2.학생의 중간 수식 계산 오류 방관, 3.학생이 이미 설명한 개념을 다시 묻는 뒷북 질문)를 경고하기 위한 단원 공통 규칙입니다. 수열, 지수로그, 삼각함수, 미적분 등 모든 문제를 풀 때 이 메커니즘을 동일하게 적용하십시오.
+
+[예시 상황: f(x)g(x)의 연속성을 묻는 문제에서, 학생이 "g는 연속이라 f에 대해서만 생각하면 돼요. a+3 = a^2-a 이거나 -a+7=0 이어야 해요"라고 대답한 상황]
+
+❌ 최악의 AI 튜터 대응 (전 단원 절대 금지 행동):
+"정확합니다! (★실수 1: 학생이 유도한 식의 부호 오류(-a-7=0)를 검증 안 하고 무지성 수용함)
+그런데 만약 f(x)가 불연속이라면 g(a)가 어떤 값을 가져야 할까요? (★실수 2: 학생이 스스로 깨달아야 할 핵심 개념인 g(a)=0을 튜터가 먼저 발설함) 
+또한 첫 번째 경우에 전체가 연속이 되는지 확인해 볼까요?" (★실수 3: 학생이 첫 줄에 이미 g가 연속이라 fg를 비교할 때~ 라고 설명한 개념을 뒷북으로 다시 물어봄)
+
+✅ 최고의 AI 튜터 대응 (전 단원 권장 행동 원칙):
+"[AI 내부 팩트 체크: (필수 출력) 
+1. 팩트 대조: 학생의 답이 정답이든 오답이든 무조건 튜터가 직접 계산한 팩트와 대조하여 이곳에 기록합니다. (예: 첫 번째 식은 맞으나 두 번째 식은 -a-7=0이 되어야 하므로 부호 실수가 발견됨)
+2. 최단 경로 평가: 튜터가 문제를 끝까지 시뮬레이션 해보고, 학생의 현재 접근법이 비효율적이라면 어떻게 거시적 목표로 우회시킬지 전략을 짭니다.]
+
+학생, 아주 훌륭한 접근이에요! 문제의 핵심 성질(g의 연속성)을 파악해서 스스로 기준을 나누어 식을 세운 점이 정말 멋집니다! 👍 
+그런데 두 번째로 세워준 식에서, 값을 대입하여 식을 전개할 때 혹시 부호 실수가 없는지 다시 한번 꼼꼼히 확인해 볼까요? 
+(이후 학생이 오류를 스스로 정정하도록 유도하며 정답을 향해 직진함)"
+
 """
 
-FACT_CHECKER_PROMPT = BASE_FACT_CHECKER_PROMPT.replace("[SU1_STRATEGY_PLACEHOLDER]", su1_strategy)\
-                                               .replace("[SU2_STRATEGY_PLACEHOLDER]", su2_strategy)
+# 수식 깨짐 방지를 위해 안전하게 치환(.replace)하여 최종 프롬프트 완성
+SYSTEM_INSTRUCTION = BASE_SYSTEM_INSTRUCTION.replace("[SU1_STRATEGY_PLACEHOLDER]", su1_strategy)\
+                                            .replace("[SU2_STRATEGY_PLACEHOLDER]", su2_strategy)
 
-
-# ====================================================================
-# [AI 2: 발문 튜터 프롬프트] - 구체적 발문 양식 강제 및 권유형 어투 제거
-# ====================================================================
-BASE_TUTOR_PROMPT = """
-당신은 팩트체커가 설계한 '전략적 이정표'를 바탕으로, 학생에게 날카롭고 본질적인 질문을 던지는 '수학 전문 튜터'입니다.
-
-[🚨 발문 및 어투 통제 절대 원칙]
-1. 진부한 권유형 및 앵무새 표현 전면 금지: 
-   - 문장 끝에 습관적으로 붙이는 '~해 볼까요?', '~ 고민해 볼까요?', '~ 생각해 볼까요?', '~ 차근차근 구해볼까요?'를 **절대로 사용하지 마십시오.** 이 어투는 발문을 모호하게 만들고 대화의 긴장감을 떨어뜨립니다.
-   - 대신 명확하고 세련된 질문형과 주도적인 어조를 사용하십시오. 
-     (정상 예시: "~은 무엇일까?", "~에 주목해 보자.", "이 조건에서 우리가 이끌어낼 수 있는 규칙은 무엇이니?", "일일이 대입하는 것 외에 전체 구조를 이용할 방법은 없을까?")
-2. 수식 표기 원칙: 숫자와 부호는 절대로 '마이너스 십사', '플러스'와 같이 한글로 풀지 마십시오. 반드시 수학 표준 기호와 숫자(예: -14, +, -)를 사용하십시오.
-3. 스포일러 금지: 팩트체커가 지정한 [절대 금지어]나 힌트 원리를 문장에 포함하지 마십시오. 학생이 스스로 전략을 깨달을 수 있도록 발문의 구체성(초점)만 정교하게 맞추십시오.
-4. 한 번에 오직 한두 줄 내외의 담백하고 강력한 한 가지 질문만 던지십시오. 장황한 격려나 서론은 일절 생략하십시오.
-"""
-
-
-# --- 🏗️ 4. LangGraph 파이프라인(Dual-LLM) 조립 ---
-class TutorState(TypedDict):
-    chat_history: List[Dict[str, Any]] 
-    student_msg: str
-    image_base64: str                  
-    tutor_guideline: str
-    final_response: str
-
-def format_history_for_langchain(history):
-    formatted = []
-    for msg in history:
-        if msg["role"] == "user":
-            formatted.append(HumanMessage(content=msg["content"]))
-        else:
-            formatted.append(AIMessage(content=msg["content"]))
-    return formatted
-
-def fact_checker_node(state: TutorState):
-    student_msg = state["student_msg"]
-    image_base64 = state["image_base64"]
-    history = format_history_for_langchain(state["chat_history"])
-    
-    messages = [SystemMessage(content=FACT_CHECKER_PROMPT)] + history
-    
-    if image_base64:
-        content = [
-            {"type": "text", "text": f"학생의 현재 입력: {student_msg}"},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-        ]
-        messages.append(HumanMessage(content=content))
-    else:
-        messages.append(HumanMessage(content=f"학생의 현재 입력: {student_msg}"))
-        
-    response = llm.invoke(messages)
-    return {"tutor_guideline": response.content}
-
-def extract_pure_text(content):
-    if isinstance(content, list):
-        return "".join([item.get("text", "") for item in content if isinstance(item, dict) and "text" in item])
-    
-    if isinstance(content, str):
-        content_stripped = content.strip()
-        if content_stripped.startswith("[{") and "'text':" in content_stripped:
-            import re
-            match = re.search(r"'text':\s*['\"](.*?)['\"],\s*'extras'", content_stripped, re.DOTALL)
-            if match:
-                return match.group(1).replace('\\n', '\n').replace('\\xa0', ' ')
-        return content_stripped
-        
-    return str(content)
-
-def tutor_node(state: TutorState):
-    guideline = state["tutor_guideline"]
-    student_msg = state["student_msg"]
-    history = format_history_for_langchain(state["chat_history"])
-    
-    messages = [SystemMessage(content=BASE_TUTOR_PROMPT)] + history
-    
-    messages.append(HumanMessage(content=f"""
-[팩트체커의 분석 및 전략 지침]:
-{guideline}
-
-위 지침의 [왜 이 발문을 해야 하는가]를 달성하기 위해, [어떻게 유도할 것인가]를 반영한 날카롭고 세련된 질문을 학생의 마지막 말('{student_msg}')에 대응하여 완성해줘.
-
-🚨 [최종 출력 검문 조건]
-- '~해볼까요?', '~고민해볼까요?' 같은 수동적인 표현이 문장에 단 한 글자라도 들어가면 안 됨.
-- 수식과 숫자는 무조건 기호와 숫자(-14, 1024)로 표기할 것. 한글(마이너스) 금지.
-- 지침에 적힌 핵심 원리나 정답을 직접 노출하여 스포일러하지 말 것.
-"""))
-    
-    response = llm.invoke(messages)
-    clean_text = extract_pure_text(response.content)
-    
-    return {"final_response": clean_text}
-
-workflow = StateGraph(TutorState)
-workflow.add_node("FactChecker", fact_checker_node)
-workflow.add_node("Tutor", tutor_node)
-workflow.set_entry_point("FactChecker")
-workflow.add_edge("FactChecker", "Tutor")
-workflow.add_edge("Tutor", END)
-app_graph = workflow.compile()
-
-
-# --- 💾 데이터 초기화 및 사이드바 ---
+# 4. 데이터 초기화 (기존 유저면 HISTORY_FILE에서 대화 내역이 자동으로 로드됨)
 if "all_chats" not in st.session_state:
     st.session_state.all_chats = load_all_chats()
 
@@ -394,23 +404,30 @@ if "current_chat_id" not in st.session_state:
         create_new_chat()
         save_all_chats(st.session_state.all_chats)
 
+# 대화방 개별 삭제 함수
 def delete_chat(chat_id_to_delete):
     if chat_id_to_delete in st.session_state.all_chats:
         del st.session_state.all_chats[chat_id_to_delete]
+        
         if st.session_state.current_chat_id == chat_id_to_delete:
             if st.session_state.all_chats: 
                 st.session_state.current_chat_id = list(st.session_state.all_chats.keys())[-1]
             else: 
                 create_new_chat()
+                
         save_all_chats(st.session_state.all_chats)
 
+# 💡 여기에 기존 학생/새 학생 판별 및 안전장치 코드가 들어갑니다!
 if not st.session_state.get("all_chats"):
     st.session_state.all_chats = {}
-    create_new_chat() 
+    create_new_chat() # 첫 환영 인사 대화방 개설
 
+# 5. 왼쪽 사이드바 (학생 전용 제어판)
 with st.sidebar:
+    # user_id 대신 세션 상태에 저장된 값을 직접 불러오도록 수정했습니다.
     st.markdown(f"### 👤 접속자: **{st.session_state.user_id}**")
     
+    # 로그아웃 버튼 (클라우드 연동 버전: 기기 접속만 해제하고 DB 기록은 보존)
     if st.button("🚪 로그아웃", use_container_width=True):
         st.session_state.logged_in = False
         st.session_state.user_id = ""
@@ -430,6 +447,7 @@ with st.sidebar:
 
     for cid in reversed(list(st.session_state.all_chats.keys())):
         col1, col2 = st.columns([4, 1])
+        
         chat_title = st.session_state.all_chats[cid]["title"]
         if cid == st.session_state.current_chat_id:
             chat_title = f"▶️ {chat_title}"
@@ -443,8 +461,7 @@ with st.sidebar:
                 delete_chat(cid)
                 st.rerun()
 
-
-# --- 🖥️ 6. 메인 화면 출력 ---
+# 6. 메인 화면 출력
 st.title("🧠 M-CoT AI 수학 튜터")
 
 if st.session_state.current_chat_id not in st.session_state.all_chats:
@@ -460,8 +477,7 @@ uploaded_file = st.file_uploader("📸 문제/풀이 사진 업로드 (선택사
 if uploaded_file is not None:
     st.image(uploaded_file, caption="업로드 대기 중인 이미지", width=300)
 
-
-# --- 🚀 7. 질문 입력 및 답변 처리 (수술 완료된 심장부) ---
+# --- 🚀 7. 질문 입력 및 답변 처리 ---
 if prompt := st.chat_input("AI 튜터의 질문에 답하거나 추가 질문을 입력하세요!"):
     
     with st.chat_message("user"):
@@ -471,37 +487,44 @@ if prompt := st.chat_input("AI 튜터의 질문에 답하거나 추가 질문을
     if len(current_messages) == 3:
         st.session_state.all_chats[st.session_state.current_chat_id]["title"] = f"🔍 {prompt[:10]}..."
 
-    with st.spinner("AI 튜터가 구조를 분석하는 중입니다..."):
+    with st.spinner("AI 튜터가 최적의 전략을 분석 중입니다..."):
         try:
-            # 1. 이미지 처리 (이미지를 Base64로 변환하여 LangGraph에 전달 준비)
+            model = genai.GenerativeModel(model_name="gemini-3.1-flash-lite", system_instruction=SYSTEM_INSTRUCTION)
+            
+            chat_history = []
+            for msg in current_messages[:-1]:
+                role = "user" if msg["role"] == "user" else "model"
+                chat_history.append({"role": role, "parts": [msg["content"]]})
+            
+            chat = model.start_chat(history=chat_history)
+            
             image_sent_key = f"image_sent_{st.session_state.current_chat_id}"
-            img_base64 = ""
             
             if uploaded_file is not None and not st.session_state.get(image_sent_key, False):
                 img = Image.open(uploaded_file)
-                buffered = BytesIO()
-                # 이미지를 RGB로 변환하여 JPEG 포맷 호환성 보장
-                if img.mode != 'RGB':
-                    img = img.convert('RGB')
-                img.save(buffered, format="JPEG")
-                img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                st.session_state[image_sent_key] = True 
+                response = chat.send_message([prompt, img])
+                st.session_state[image_sent_key] = True
+            else:
+                response = chat.send_message(prompt)
             
-            # 2. LangGraph 실행 (과거 기록은 맨 마지막 질문을 제외하고 넘김)
-            inputs = {
-                "chat_history": current_messages[:-1], 
-                "student_msg": prompt, 
-                "image_base64": img_base64
-            }
+            # 🚨 [여기서 투명 망토 필터가 작동합니다!] 🚨
+            raw_text = response.text
+            final_display_text = raw_text
             
-            # 컨베이어 벨트 가동! (FactChecker -> Tutor)
-            result = app_graph.invoke(inputs)
-            final_text = result["final_response"]
+            # AI 답변에 "[실제 발문]" 이라는 키워드가 있다면, 그 뒷부분만 잘라내서 씁니다.
+            if "[실제 발문]" in raw_text:
+                final_display_text = raw_text.split("[실제 발문]")[-1].strip()
+            # 혹시 "[실제 발문]" 키워드 없이 옛날 방식으로 "[AI 내부 팩트 체크]"만 썼다면 그 부분만 삭제합니다.
+            elif "[AI 내부 팩트 체크]" in raw_text:
+                import re
+                final_display_text = re.sub(r'\[AI 내부 팩트 체크\].*?(?=\n\n|$)', '', raw_text, flags=re.DOTALL).strip()
             
-            # 3. 화면 출력 및 저장
             with st.chat_message("assistant"):
-                st.markdown(final_text)
-            current_messages.append({"role": "assistant", "content": final_text})
+                # 학생 화면에는 필터링 된 깔끔한 발문만 출력됩니다.
+                st.markdown(final_display_text)
+                
+            # 기록 저장 시에도 깨끗한 발문만 저장하여 시스템 오염을 막습니다.
+            current_messages.append({"role": "assistant", "content": final_display_text})
             
             st.session_state.all_chats[st.session_state.current_chat_id]["messages"] = current_messages
             save_all_chats(st.session_state.all_chats)

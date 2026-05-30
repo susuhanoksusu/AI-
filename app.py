@@ -326,6 +326,25 @@ def fact_checker_node(state: TutorState):
     response = llm.invoke(messages)
     return {"tutor_guideline": response.content}
 
+def extract_pure_text(content):
+    # 1. AI 응답이 아예 파이썬 리스트 객체로 나온 경우
+    if isinstance(content, list):
+        return "".join([item.get("text", "") for item in content if isinstance(item, dict) and "text" in item])
+    
+    # 2. 문자열인데 "[{'type': 'text',..." 형태로 꼬여서 나온 경우
+    if isinstance(content, str):
+        content_stripped = content.strip()
+        if content_stripped.startswith("[{") and "'text':" in content_stripped:
+            import re
+            # 'text': '진짜 내용', 'extras' 사이의 진짜 내용만 정밀하게 적출
+            match = re.search(r"'text':\s*['\"](.*?)['\"],\s*'extras'", content_stripped, re.DOTALL)
+            if match:
+                # 추출 과정에서 깨진 줄바꿈 기호 복원
+                return match.group(1).replace('\\n', '\n').replace('\\xa0', ' ')
+        return content_stripped
+        
+    return str(content)
+
 def tutor_node(state: TutorState):
     guideline = state["tutor_guideline"]
     student_msg = state["student_msg"]
@@ -335,7 +354,11 @@ def tutor_node(state: TutorState):
     messages.append(HumanMessage(content=f"[팩트체커의 지시사항]: {guideline}\n\n위 지시사항을 바탕으로 학생의 마지막 말('{student_msg}')에 대답하는 단 하나의 발문을 생성해."))
     
     response = llm.invoke(messages)
-    return {"final_response": response.content}
+    
+    # 🚨 생성된 응답을 순수 텍스트 추출기에 한 번 통과시킨 후 저장 (분쇄기 작동!)
+    clean_text = extract_pure_text(response.content)
+    
+    return {"final_response": clean_text}
 
 workflow = StateGraph(TutorState)
 workflow.add_node("FactChecker", fact_checker_node)

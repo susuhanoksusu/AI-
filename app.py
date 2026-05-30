@@ -279,10 +279,10 @@ BASE_FACT_CHECKER_PROMPT = """
 [SU2_STRATEGY_PLACEHOLDER]
 ==================================================
 """
-"""
 
+# ⚠️ 뜬금없는 따옴표 지우고 정상적으로 replace 처리
 FACT_CHECKER_PROMPT = BASE_FACT_CHECKER_PROMPT.replace("[SU1_STRATEGY_PLACEHOLDER]", su1_strategy)\
-                                              .replace("[SU2_STRATEGY_PLACEHOLDER]", su2_strategy)
+                                               .replace("[SU2_STRATEGY_PLACEHOLDER]", su2_strategy)
 
 # [AI 2: 발문 튜터 프롬프트]
 BASE_TUTOR_PROMPT = """
@@ -301,11 +301,12 @@ BASE_TUTOR_PROMPT = """
 5. 인지적 마감: 학생이 최종 답을 맞히고 검증까지 완료했다면 칭찬 후 "다음 문제를 푸실 때는 꼭 '새 채팅방(New Chat)'을 열어서 질문해 주세요!"라고 안내하며 대화를 종료하십시오.
 """
 
+
 # --- 🏗️ 4. LangGraph 파이프라인(Dual-LLM) 조립 ---
 class TutorState(TypedDict):
-    chat_history: List[Dict[str, Any]] # 이전 대화 기억용
+    chat_history: List[Dict[str, Any]] 
     student_msg: str
-    image_base64: str                  # 이미지 데이터
+    image_base64: str                  
     tutor_guideline: str
     final_response: str
 
@@ -325,7 +326,6 @@ def fact_checker_node(state: TutorState):
     
     messages = [SystemMessage(content=FACT_CHECKER_PROMPT)] + history
     
-    # 멀티모달(이미지) 처리 로직
     if image_base64:
         content = [
             {"type": "text", "text": f"학생의 현재 입력: {student_msg}"},
@@ -339,19 +339,15 @@ def fact_checker_node(state: TutorState):
     return {"tutor_guideline": response.content}
 
 def extract_pure_text(content):
-    # 1. AI 응답이 아예 파이썬 리스트 객체로 나온 경우
     if isinstance(content, list):
         return "".join([item.get("text", "") for item in content if isinstance(item, dict) and "text" in item])
     
-    # 2. 문자열인데 "[{'type': 'text',..." 형태로 꼬여서 나온 경우
     if isinstance(content, str):
         content_stripped = content.strip()
         if content_stripped.startswith("[{") and "'text':" in content_stripped:
             import re
-            # 'text': '진짜 내용', 'extras' 사이의 진짜 내용만 정밀하게 적출
             match = re.search(r"'text':\s*['\"](.*?)['\"],\s*'extras'", content_stripped, re.DOTALL)
             if match:
-                # 추출 과정에서 깨진 줄바꿈 기호 복원
                 return match.group(1).replace('\\n', '\n').replace('\\xa0', ' ')
         return content_stripped
         
@@ -362,14 +358,12 @@ def tutor_node(state: TutorState):
     student_msg = state["student_msg"]
     history = format_history_for_langchain(state["chat_history"])
     
-    messages = [SystemMessage(content=TUTOR_PROMPT)] + history
+    # ⚠️ 오타 교정: TUTOR_PROMPT를 BASE_TUTOR_PROMPT로 수정 완료
+    messages = [SystemMessage(content=BASE_TUTOR_PROMPT)] + history
     messages.append(HumanMessage(content=f"[팩트체커의 지시사항]: {guideline}\n\n위 지시사항을 바탕으로 학생의 마지막 말('{student_msg}')에 대답하는 단 하나의 발문을 생성해."))
     
     response = llm.invoke(messages)
-    
-    # 🚨 생성된 응답을 순수 텍스트 추출기에 한 번 통과시킨 후 저장 (분쇄기 작동!)
     clean_text = extract_pure_text(response.content)
-    
     return {"final_response": clean_text}
 
 workflow = StateGraph(TutorState)

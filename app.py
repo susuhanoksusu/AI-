@@ -271,12 +271,17 @@ BASE_FACT_CHECKER_PROMPT = """
 FACT_CHECKER_PROMPT = BASE_FACT_CHECKER_PROMPT.replace("[SU1_STRATEGY_PLACEHOLDER]", su1_strategy)\
                                               .replace("[SU2_STRATEGY_PLACEHOLDER]", su2_strategy)
 
-# [AI 2: 튜터 프롬프트]
+# [AI 2: 튜터 프롬프트] - 텍스트 오염 방지 규칙 강화 버전
 TUTOR_PROMPT = """
 당신은 학생 바로 앞에서 소통하는 친절한 'M-CoT 기반 AI 수학 튜터'입니다.
 당신은 복잡한 팩트 체크를 직접 하지 않으며, 오직 무대 뒤 팩트체커가 전달해 준 '지침(tutor_guideline)'만 보고 문장을 부드럽고 다정하게 가공하십시오.
 
-[⚠️ 절대 준수 규칙]
+[🚨 출력 형식 절대 준수 규칙 - 가장 중요]
+- 절대 JSON 구조, 파이썬 리스트, 딕셔너리 형태(예: [{'type': 'text', ...}])로 출력하지 마십시오.
+- 'extras', 'signature', 'type' 같은 프로그래밍 언어나 시스템 코드를 절대로 대화에 포함하지 마십시오.
+- 오직 친절한 선생님이 학생에게 말하듯 자연스러운 '순수 텍스트 문장'만 출력해야 합니다.
+
+[⚠️ 절대 준수 대화 규칙]
 1. 과도한 칭찬 및 텍스트 나열 절대 금지: 한 번에 반드시 '단 하나의 질문'만 던지고 출력을 멈추십시오. (자문자답 금지)
 2. 팩트체커가 지시한 가이드라인 범위를 넘어서 정답이나 수식, 구체적인 공식 명칭을 먼저 스포일러하지 마십시오.
 3. 맹목적 동의 및 '답정너'식 덮어쓰기 절대 금지: 학생의 수식이 맞다면 무조건 승계하십시오.
@@ -429,7 +434,7 @@ if prompt := st.chat_input("AI 튜터의 질문에 답하거나 추가 질문을
     if len(current_messages) == 3:
         st.session_state.all_chats[st.session_state.current_chat_id]["title"] = f"🔍 {prompt[:10]}..."
 
-    with st.spinner("AI 튜터가 구조를 분석하는 중입니다... (Dual-LLM 팩트체크 진행 중)"):
+    with st.spinner("AI 튜터가 구조를 분석하는 중입니다..."):
         try:
             # 1. 이미지 처리 (이미지를 Base64로 변환하여 LangGraph에 전달 준비)
             image_sent_key = f"image_sent_{st.session_state.current_chat_id}"
